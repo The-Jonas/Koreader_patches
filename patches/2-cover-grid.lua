@@ -11,23 +11,28 @@ What it does:
     being distorted.
   - Rounds the corners of covers and folder thumbnails.
   - Replaces the Project: Title indicators (progress bar, trophy, pause, series
-    number) with its own badges:
-      top left      series number ("#2")
-      top right     percentage read (books in progress)
-      bottom left   page count (books not opened yet)
-      bottom right  dog-ear (finished / abandoned)
-      below series  star, if the book is in a collection
+    number) with its own badges, in one of three styles:
+      classic  text badges, dog-ear for finished / on hold books
+      medals   round trophy / pause medals, flame next to the percentage
+      quest    XP bar along the bottom of the cover, trophy / pause medals
+    Series number ("#2") and a collection star sit on the top left; page count
+    shows on books not opened yet.
+  - Marks books in progress that were not opened for a number of days: the
+    percentage badge switches to an hourglass (the book status is not changed).
   - Optional: fades the covers of finished books.
 
 Usage:
   1. Copy this file to koreader/patches/ and restart KOReader.
   2. In Project: Title, choose the "Cover Grid" display mode.
-  3. Edit the CONFIG table below to change aspect ratio, corners and badges.
+  3. Pick the badge style and the idle days in
+     Project: Title settings → Cover badges.
+  4. Edit the CONFIG table below for aspect ratio, corners and default values.
   Since this patch redraws the covers, avoid combining it with other patches
   that also change Cover Grid covers.
 
 Requires: Project: Title 3.8+.
 Inspired by SeriousHornet's cover patches (github.com/SeriousHornet/KOReader.patches).
+Icons from Tabler Icons (tabler.io/icons), MIT License, © Paweł Kuna.
 ]]
 
 local CONFIG = {
@@ -38,6 +43,14 @@ local CONFIG = {
     hide_pt_overlays = true,   -- hide Project: Title progress bar and icons
     fade_finished = false,     -- fade covers of finished books
     fade_amount = 0.5,         -- fade strength (0 to 1)
+    -- Default badge look (can also be changed in the menu):
+    --   "classic"  text badges and a dog-ear for finished / on hold books
+    --   "medals"   round icon medals (trophy, pause), flame next to the percentage
+    --   "quest"    XP bar along the bottom of the cover plus the status medals
+    badge_style = "medals",
+    -- Default number of days without opening a book in progress before its
+    -- percentage badge shows an hourglass (0 = off; can also be changed in the menu)
+    idle_days = 7,
     badge_font_size = 14,
     badges = {
         series = true,
@@ -50,19 +63,43 @@ local CONFIG = {
 
 local Blitbuffer = require("ffi/blitbuffer")
 local CenterContainer = require("ui/widget/container/centercontainer")
+local DataStorage = require("datastorage")
+local DocSettings = require("docsettings")
 local Font = require("ui/font")
 local FrameContainer = require("ui/widget/container/framecontainer")
 local Geom = require("ui/geometry")
+local HorizontalGroup = require("ui/widget/horizontalgroup")
+local HorizontalSpan = require("ui/widget/horizontalspan")
 local IconWidget = require("ui/widget/iconwidget")
 local ImageWidget = require("ui/widget/imagewidget")
 local InputContainer = require("ui/widget/container/inputcontainer")
 local ReadCollection = require("readcollection")
 local Size = require("ui/size")
+local SpinWidget = require("ui/widget/spinwidget")
 local TextWidget = require("ui/widget/textwidget")
+local UIManager = require("ui/uimanager")
 local Screen = require("device").screen
+local lfs = require("libs/libkoreader-lfs")
 local logger = require("logger")
 local userpatch = require("userpatch")
 local util = require("util")
+local T = require("ffi/util").template
+
+-- Badge style chosen in the menu, or the CONFIG default
+local function badgeStyle()
+    return G_reader_settings:readSetting("cover_grid_badge_style", CONFIG.badge_style)
+end
+
+-- Idle days chosen in the menu, or the CONFIG default
+local function idleDays()
+    return G_reader_settings:readSetting("cover_grid_idle_days", CONFIG.idle_days)
+end
+
+-- Time the book was last closed, taken from its metadata file (nil if never opened)
+local function lastReadTime(filepath)
+    local sidecar = DocSettings:findSidecarFile(filepath)
+    return sidecar and lfs.attributes(sidecar, "modification")
+end
 
 -- Largest box with the configured aspect ratio that fits in max_w × max_h
 local function fitBox(max_w, max_h)
@@ -112,8 +149,61 @@ local function roundRect(bb, d)
     end
 end
 
--- Builds a rounded text badge
-local function makeBadge(text, fg, bg)
+-- Icon shapes from Tabler Icons (https://tabler.io/icons), MIT License, © Paweł Kuna
+local ICONS = {
+    trophy = { "M17 3a1 1 0 0 1 .993 .883l.007 .117v2.17a3 3 0 1 1 0 5.659v.171a6.002 6.002 0 0 1 -5 5.917v2.083h3a1 1 0 0 1 .117 1.993l-.117 .007h-8a1 1 0 0 1 -.117 -1.993l.117 -.007h3v-2.083a6.002 6.002 0 0 1 -4.996 -5.692l-.004 -.225v-.171a3 3 0 0 1 -3.996 -2.653l-.003 -.176l.005 -.176a3 3 0 0 1 3.995 -2.654l-.001 -2.17a1 1 0 0 1 1 -1h10zm-12 5a1 1 0 1 0 0 2a1 1 0 0 0 0 -2m14 0a1 1 0 1 0 0 2a1 1 0 0 0 0 -2" },
+    pause = {
+        "M9 4h-2a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h2a2 2 0 0 0 2 -2v-12a2 2 0 0 0 -2 -2z",
+        "M17 4h-2a2 2 0 0 0 -2 2v12a2 2 0 0 0 2 2h2a2 2 0 0 0 2 -2v-12a2 2 0 0 0 -2 -2z",
+    },
+    book = { "M21.5 5.134a1 1 0 0 1 .493 .748l.007 .118v13a1 1 0 0 1 -1.5 .866a8 8 0 0 0 -7.5 -.266v-15.174a10 10 0 0 1 8.5 .708m-10.5 -.707l.001 15.174a8 8 0 0 0 -7.234 .117l-.327 .18l-.103 .044l-.049 .016l-.11 .026l-.061 .01l-.117 .006h-.042l-.11 -.012l-.077 -.014l-.108 -.032l-.126 -.056l-.095 -.056l-.089 -.067l-.06 -.056l-.073 -.082l-.064 -.089l-.022 -.036l-.032 -.06l-.044 -.103l-.016 -.049l-.026 -.11l-.01 -.061l-.004 -.049l-.002 -13.068a1 1 0 0 1 .5 -.866a10 10 0 0 1 8.5 -.707" },
+    star = { "M8.243 7.34l-6.38 .925l-.113 .023a1 1 0 0 0 -.44 1.684l4.622 4.499l-1.09 6.355l-.013 .11a1 1 0 0 0 1.464 .944l5.706 -3l5.693 3l.1 .046a1 1 0 0 0 1.352 -1.1l-1.091 -6.355l4.624 -4.5l.078 -.085a1 1 0 0 0 -.633 -1.62l-6.38 -.926l-2.852 -5.78a1 1 0 0 0 -1.794 0l-2.853 5.78z" },
+    hourglass = { "M17 2a2 2 0 0 1 1.995 1.85l.005 .15v2a6.996 6.996 0 0 1 -3.393 6a6.994 6.994 0 0 1 3.388 5.728l.005 .272v2a2 2 0 0 1 -1.85 1.995l-.15 .005h-10a2 2 0 0 1 -1.995 -1.85l-.005 -.15v-2a6.996 6.996 0 0 1 3.393 -6a6.994 6.994 0 0 1 -3.388 -5.728l-.005 -.272v-2a2 2 0 0 1 1.85 -1.995l.15 -.005h10z" },
+    flame = { "M10 2c0 -.88 1.056 -1.331 1.692 -.722c1.958 1.876 3.096 5.995 1.75 9.12l-.08 .174l.012 .003c.625 .133 1.203 -.43 2.303 -2.173l.14 -.224a1 1 0 0 1 1.582 -.153c1.334 1.435 2.601 4.377 2.601 6.27c0 4.265 -3.591 7.705 -8 7.705s-8 -3.44 -8 -7.706c0 -2.252 1.022 -4.716 2.632 -6.301l.605 -.589c.241 -.236 .434 -.43 .618 -.624c1.43 -1.512 2.145 -2.924 2.145 -4.78" },
+}
+
+-- Writes an icon as an SVG file in the given color (once) and returns its path
+local icon_dir = DataStorage:getDataDir() .. "/cache/cover-grid-icons"
+local function iconFile(name, color)
+    local path = string.format("%s/%s-%s.svg", icon_dir, name, color:sub(2))
+    if not util.fileExists(path) then
+        util.makePath(icon_dir)
+        local paths = {}
+        for _, d in ipairs(ICONS[name]) do
+            table.insert(paths, string.format('<path fill="%s" d="%s"/>', color, d))
+        end
+        local f = io.open(path, "w")
+        if not f then return nil end
+        f:write('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">', table.concat(paths), "</svg>")
+        f:close()
+    end
+    return path
+end
+
+-- Builds an image widget for an icon at the given size and color
+local function makeIcon(name, color, size)
+    local file = iconFile(name, color)
+    if not file then return nil end
+    return ImageWidget:new { file = file, width = size, height = size, alpha = true }
+end
+
+-- Builds a rounded badge with text and an optional leading icon
+local function makeBadge(text, fg, bg, icon)
+    local font_size = CONFIG.badge_font_size
+    local label = TextWidget:new {
+        text = text,
+        face = Font:getFace("cfont", font_size),
+        bold = true,
+        fgcolor = fg,
+    }
+    local content = label
+    if icon then
+        local fg_hex = fg == Blitbuffer.COLOR_WHITE and "#FFFFFF" or "#000000"
+        local image = makeIcon(icon, fg_hex, label:getSize().h - Screen:scaleBySize(4))
+        if image then
+            content = HorizontalGroup:new { align = "center", image, HorizontalSpan:new { width = Screen:scaleBySize(3) }, label }
+        end
+    end
     return FrameContainer:new {
         radius = Screen:scaleBySize(8),
         bordersize = Size.border.thin,
@@ -123,13 +213,44 @@ local function makeBadge(text, fg, bg)
         padding = Screen:scaleBySize(2),
         padding_left = Screen:scaleBySize(6),
         padding_right = Screen:scaleBySize(6),
-        TextWidget:new {
-            text = text,
-            face = Font:getFace("cfont", CONFIG.badge_font_size),
-            bold = true,
-            fgcolor = fg,
-        },
+        content,
     }
+end
+
+-- Draws a round medal with an icon; dark = black medal with white icon, otherwise white with black outline
+local function drawMedal(bb, x, y, size, icon, dark)
+    local r = math.floor(size / 2)
+    local cx, cy = x + r, y + r
+    if dark then
+        bb:paintCircle(cx, cy, r + Screen:scaleBySize(2), Blitbuffer.COLOR_WHITE)
+        bb:paintCircle(cx, cy, r, Blitbuffer.COLOR_BLACK)
+    else
+        bb:paintCircle(cx, cy, r, Blitbuffer.COLOR_WHITE)
+        bb:paintCircle(cx, cy, r, Blitbuffer.COLOR_BLACK, Screen:scaleBySize(2))
+    end
+    local icon_size = math.floor(size * 0.55)
+    local image = makeIcon(icon, dark and "#FFFFFF" or "#000000", icon_size)
+    if image then
+        image:paintTo(bb, cx - math.floor(icon_size / 2), cy - math.floor(icon_size / 2))
+        image:free()
+    end
+end
+
+-- Draws the XP bar along the bottom of the cover; fill goes from 0 to 1
+local function drawXpBar(bb, d, fill, fill_color)
+    local inset = Screen:scaleBySize(6)
+    local h = Screen:scaleBySize(10)
+    local x, y, w = d.x + inset, d.y + d.h - h - inset, d.w - 2 * inset
+    local r = math.floor(h / 2)
+    local halo = Screen:scaleBySize(2)
+    bb:paintRoundedRect(x - halo, y - halo, w + 2 * halo, h + 2 * halo, Blitbuffer.COLOR_WHITE, r + halo)
+    bb:paintRoundedRect(x, y, w, h, Blitbuffer.COLOR_WHITE, r)
+    local fw = math.floor(w * math.max(0, math.min(1, fill)))
+    if fw > 0 then
+        bb:paintRoundedRect(x, y, math.max(fw, h), h, fill_color, r)
+    end
+    bb:paintBorder(x, y, w, h, Size.border.thin, Blitbuffer.COLOR_BLACK, r)
+    return y
 end
 
 -- Draws a dog-ear with a black outline on the bottom right corner of the cover
@@ -176,24 +297,56 @@ local function drawBadges(item, bb, d)
         drawCollectionStar(bb, d.x + inset, next_left_y)
     end
 
-    if CONFIG.badges.percent and opened and item.percent_finished and item.status ~= "complete" then
+    local style = badgeStyle()
+    local in_progress = opened and item.percent_finished and item.status ~= "complete"
+    local medal_size = Screen:scaleBySize(30)
+    local days = idleDays()
+    local idle = in_progress and item.status ~= "abandoned" and days > 0 and item._cg_last_read
+        and os.time() - item._cg_last_read > days * 86400
+
+    if CONFIG.badges.percent and in_progress then
         local text = string.format("%d%%", math.floor(item.percent_finished * 100))
-        local badge = makeBadge(text, Blitbuffer.COLOR_WHITE, Blitbuffer.COLOR_BLACK)
-        badge:paintTo(bb, d.x + d.w - badge:getSize().w - inset, d.y + inset)
+        local icon
+        if idle then
+            icon = "hourglass"
+        elseif style == "medals" and item.status ~= "abandoned" then
+            icon = "flame"
+        end
+        local dark = style ~= "quest" and not idle
+        local fg = dark and Blitbuffer.COLOR_WHITE or Blitbuffer.COLOR_BLACK
+        local bg = dark and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_WHITE
+        local badge = makeBadge(text, fg, bg, icon)
+        if style == "quest" then
+            local fill_color = (item.status == "abandoned" or idle) and Blitbuffer.COLOR_GRAY_9 or Blitbuffer.COLOR_BLACK
+            local bar_y = drawXpBar(bb, d, item.percent_finished, fill_color)
+            badge:paintTo(bb, d.x + d.w - badge:getSize().w - inset, bar_y - badge:getSize().h - Screen:scaleBySize(3))
+        else
+            badge:paintTo(bb, d.x + d.w - badge:getSize().w - inset, d.y + inset)
+        end
         badge:free()
     end
 
     if CONFIG.badges.pages and not opened and item.status ~= "complete" and bookinfo and bookinfo.pages then
-        local badge = makeBadge(bookinfo.pages .. " p.", Blitbuffer.COLOR_WHITE, Blitbuffer.COLOR_GRAY_3)
+        local badge
+        if style == "classic" then
+            badge = makeBadge(bookinfo.pages .. " p.", Blitbuffer.COLOR_WHITE, Blitbuffer.COLOR_GRAY_3)
+        else
+            badge = makeBadge(tostring(bookinfo.pages), Blitbuffer.COLOR_BLACK, Blitbuffer.COLOR_WHITE, "book")
+        end
         badge:paintTo(bb, d.x + inset, d.y + d.h - badge:getSize().h - inset)
         badge:free()
     end
 
-    if CONFIG.badges.status then
-        if item.status == "complete" then
-            drawDogear(bb, d, Blitbuffer.COLOR_BLACK)
-        elseif item.status == "abandoned" then
-            drawDogear(bb, d, Blitbuffer.COLOR_WHITE)
+    if CONFIG.badges.status and (item.status == "complete" or item.status == "abandoned") then
+        if style == "classic" then
+            drawDogear(bb, d, item.status == "complete" and Blitbuffer.COLOR_BLACK or Blitbuffer.COLOR_WHITE)
+        else
+            if style == "quest" and item.status == "complete" then
+                drawXpBar(bb, d, 1, Blitbuffer.COLOR_BLACK)
+            end
+            local medal_y = style == "quest" and d.y + inset or d.y + d.h - medal_size - inset
+            local icon = item.status == "complete" and "trophy" or "pause"
+            drawMedal(bb, d.x + d.w - medal_size - inset, medal_y, medal_size, icon, item.status == "complete")
         end
     end
 end
@@ -207,6 +360,9 @@ local function patchCoverGrid(plugin)
         logger.warn("cover-grid: MosaicMenuItem not found")
         return
     end
+    -- KOReader runs plugin patches on every plugin instantiation: apply only once
+    if MosaicMenuItem._cover_grid_patched then return end
+    MosaicMenuItem._cover_grid_patched = true
     local FakeCover = userpatch.getUpValue(MosaicMenuItem.update, "FakeCover")
 
     -- Item whose update() is running; collects the thumbnails built for its folder
@@ -264,6 +420,7 @@ local function patchCoverGrid(plugin)
         orig_update(self, ...)
         building_item = nil
         if ptutil.isPathChooser(self) or self.is_directory then return end
+        self._cg_last_read = lastReadTime(self.filepath)
 
         local center = self._underline_container[1]
         local inner = center and center[1]
@@ -304,6 +461,62 @@ local function patchCoverGrid(plugin)
         if self.bookinfo_found then
             drawBadges(self, bb, d)
         end
+    end
+
+    -- Adds the "Cover badges" submenu (style and idle days) to the Project: Title settings menu
+    local orig_addToMainMenu = plugin.addToMainMenu
+    plugin.addToMainMenu = function(pt, menu_items)
+        orig_addToMainMenu(pt, menu_items)
+        local pt_menu = menu_items.filemanager_display_mode
+        if not pt_menu or not pt_menu.sub_item_table then return end
+        local function refresh()
+            local fc = pt.ui and pt.ui.file_chooser
+            if fc then fc:updateItems(1, true) end
+        end
+        local styles = { { "Classic", "classic" }, { "Medals", "medals" }, { "Quest", "quest" } }
+        local style_items = {}
+        for _, s in ipairs(styles) do
+            table.insert(style_items, {
+                text = s[1],
+                radio = true,
+                checked_func = function() return badgeStyle() == s[2] end,
+                callback = function()
+                    G_reader_settings:saveSetting("cover_grid_badge_style", s[2])
+                    refresh()
+                end,
+            })
+        end
+        style_items[#style_items].separator = true
+        table.insert(style_items, {
+            text_func = function()
+                local days = idleDays()
+                return days > 0 and T("Idle after: %1 days", days) or "Idle after: off"
+            end,
+            keep_menu_open = true,
+            callback = function(touchmenu_instance)
+                UIManager:show(SpinWidget:new {
+                    title_text = "Idle after (days)",
+                    info_text = "Books in progress not opened for this many days show an hourglass instead of the usual badge. 0 turns it off.",
+                    value = idleDays(),
+                    value_min = 0,
+                    value_max = 365,
+                    value_step = 1,
+                    value_hold_step = 7,
+                    default_value = CONFIG.idle_days,
+                    ok_always_enabled = true,
+                    callback = function(spin)
+                        G_reader_settings:saveSetting("cover_grid_idle_days", spin.value)
+                        touchmenu_instance:updateItems()
+                        refresh()
+                    end,
+                })
+            end,
+        })
+        table.insert(pt_menu.sub_item_table, 1, {
+            text = "Cover badges",
+            sub_item_table = style_items,
+            separator = true,
+        })
     end
 end
 
