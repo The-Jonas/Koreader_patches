@@ -28,6 +28,7 @@ Patches with options have a configuration table right below that block.
 | [`2-reading-session.lua`](#2-reading-sessionlua) | Session summary, daily goal with streak, and a recap when coming back to a book |
 | [`2-vocabulary-highlights.lua`](#2-vocabulary-highlightslua) | Highlights of the vocabulary color go to the Vocabulary builder |
 | [`2-sleep-screen.lua`](#2-sleep-screenlua) | Book card on the sleep screen while reading, random images elsewhere |
+| [`2-reading-stats.lua`](#2-reading-statslua) | One screen with book, week and year statistics |
 | [`2-status-bar.lua`](#2-status-barlua) | Time left in words and tidier compact items in the status bar |
 | [`2--fonts.lua`](#2--fontslua) | Interface font picker and steady Project: Title font sizes |
 
@@ -218,6 +219,28 @@ cover, and show or hide the streak.
 
 ---
 
+### `2-reading-stats.lua`
+
+One full-screen page for the numbers of *Reading statistics*, every value labelled in words.
+Swipe left or right, or tap a tab, to move between:
+
+![Book, Week and Year tabs](docs/reading-stats.png)
+
+- **Book:** progress with chapter marks, time read, time left in the chapter and in the book,
+  pages per hour, an estimated finish date at your pace of the last 14 days, days spent on the
+  book, start date, chapters finished, highlights and notes.
+- **Week:** today against the daily goal, the week day by day with the goal line, this week
+  against last week, current and best streak, and a button to KOReader's calendar.
+- **Year:** totals for the year, books finished, and month by month in hours, pages or days.
+  Tap a month to see the books read in it.
+
+The goal and the streak are the ones of `2-reading-session.lua`, so every patch shows the same
+streak. Open it from *Tools → Reading stats* or give the *Reading stats* action to a gesture;
+it works in the reader and in the file manager (without the Book tab). Needs the Reading
+statistics plugin.
+
+---
+
 ### `2-status-bar.lua`
 
 Small changes that make the reading status bar easier to read:
@@ -272,7 +295,8 @@ These patches were rewritten from community ideas:
   menu, better compact status bar items and thin progress bar with chapter marks. Basis for
   `2--fonts.lua`, `2-status-bar.lua` and the *Thin* style of `2-progress-bar.lua`.
 - **quanganhdo** — [koreader-user-patches](https://github.com/quanganhdo/koreader-user-patches):
-  time left in words. Basis for `2-status-bar.lua`.
+  reading stats and reading insights popups, time left in words. Basis for
+  `2-reading-stats.lua` and `2-status-bar.lua`.
 - **Andreas Lösel** — Project: Title font size patch. Basis for `2--fonts.lua`.
 - **omer-faruq** — dual-state sleep screen patch: a different sleep screen inside a book and in
   the file manager. Idea behind `2-sleep-screen.lua`.
