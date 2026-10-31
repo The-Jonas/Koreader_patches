@@ -25,6 +25,7 @@ Patches with options have a configuration table right below that block.
 | [`2-highlights.lua`](#2-highlightslua) | Highlight categories readable in grayscale, plus filter shortcuts |
 | [`2-reading-dates.lua`](#2-reading-dateslua) | Start and finish date of every book |
 | [`2-progress-bar.lua`](#2-progress-barlua) | Progress bar styles for the status bar while reading |
+| [`2-reading-session.lua`](#2-reading-sessionlua) | Session summary, daily goal with streak, and a recap when coming back to a book |
 
 ---
 
@@ -137,6 +138,26 @@ New looks for the status bar progress bar while reading, chosen in
 
 Chapters come from the first level of the table of contents. A taller bar (*Thickness, height
 & colors*) suits the dual style.
+
+---
+
+### `2-reading-session.lua`
+
+Makes each reading session count, in three parts that can be turned on or off:
+
+![Session summary and recap](docs/reading-session.png)
+
+- **Session summary:** when you close a book, a message shows the time read, the pages read,
+  how the percentage moved and how many chapters you finished.
+- **Daily goal and streak:** a goal in pages or minutes per day. The summary shows today's
+  total against the goal and how many days in a row you reached it. Totals come from the
+  *Reading statistics* plugin, so they add up every book read that day.
+- **Where was I?:** when you open a book you haven't opened for a number of days (7 by
+  default), a recap shows how long it has been, the current chapter with the pages left in it,
+  and your last highlights and notes in that book.
+
+Settings are in *Menu → Tools → Reading session*, while reading. The goal and the streak need
+the *Reading statistics* plugin enabled; the summary and the recap work without it.
 
 ---
 
