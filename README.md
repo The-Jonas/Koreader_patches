@@ -27,6 +27,7 @@ Patches with options have a configuration table right below that block.
 | [`2-progress-bar.lua`](#2-progress-barlua) | Progress bar styles for the status bar while reading |
 | [`2-reading-session.lua`](#2-reading-sessionlua) | Session summary, daily goal with streak, and a recap when coming back to a book |
 | [`2-vocabulary-highlights.lua`](#2-vocabulary-highlightslua) | Highlights of the vocabulary color go to the Vocabulary builder |
+| [`2-sleep-screen.lua`](#2-sleep-screenlua) | Book card on the sleep screen while reading, random images elsewhere |
 
 ---
 
@@ -193,6 +194,27 @@ which is enabled by default.
 
 ---
 
+### `2-sleep-screen.lua`
+
+When the device sleeps in the middle of a book, the sleep screen shows that book: cover, title,
+author, current chapter, a progress bar with chapter marks, the time left in the chapter and
+the reading streak. In the file manager nothing changes — the wallpaper set in the sleep screen
+settings is used, for example a random image from a folder.
+
+![Sleep screen layouts](docs/sleep-screen-layouts.png)
+
+Options in *Settings → Screen → Sleep screen → Book card while reading*: turn it on or off,
+choose the layout (*Card*, *Poster* or *Night*) and show or hide the streak.
+
+- The card replaces the *random image* and *book cover* wallpapers only while reading; the
+  other wallpaper types are left alone.
+- Books marked *Do not show this book cover on sleep screen* and books without a cover keep
+  the regular wallpaper.
+- The time left in the chapter comes from *Reading statistics*. The streak uses the daily goal
+  of `2-reading-session.lua` when it is set, and any day with reading otherwise.
+
+---
+
 ## Development
 
 The [`dev/`](dev) folder holds what is used to test the patches in a KOReader emulator
@@ -214,6 +236,8 @@ These patches were rewritten from community ideas:
   Starting point for `2-physical-pages.lua`.
 - **Kaya** — Statistics plugin fork with `applyPerfectSync`, which matched page numbers to a
   physical page count. `2-physical-pages.lua` reads the values it saved.
+- **omer-faruq** — dual-state sleep screen patch: a different sleep screen inside a book and in
+  the file manager. Idea behind `2-sleep-screen.lua`.
 - A highlight color theme shared on Reddit and a highlight filter patch, both by unknown
   authors. Basis for `2-highlights.lua`.
 
