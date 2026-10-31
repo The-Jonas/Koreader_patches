@@ -29,6 +29,7 @@ Patches with options have a configuration table right below that block.
 | [`2-vocabulary-highlights.lua`](#2-vocabulary-highlightslua) | Highlights of the vocabulary color go to the Vocabulary builder |
 | [`2-sleep-screen.lua`](#2-sleep-screenlua) | Book cover and progress on the sleep screen while reading |
 | [`2-reading-stats.lua`](#2-reading-statslua) | One screen with book, week and year statistics |
+| [`2-light-control.lua`](#2-light-controllua) | Brightness and warmth with a visible slider, absolute edge swipes and presets |
 | [`2-status-bar.lua`](#2-status-barlua) | Time left in words and tidier compact items in the status bar |
 | [`2--fonts.lua`](#2--fontslua) | Interface font picker and steady Project: Title font sizes |
 
@@ -247,6 +248,27 @@ The goal and the streak are the ones of `2-reading-session.lua`, so every patch 
 streak. Open it from *Tools → Reading stats* or give the *Reading stats* action to a gesture;
 it works in the reader and in the file manager (without the Book tab). Needs the Reading
 statistics plugin.
+
+---
+
+### `2-light-control.lua`
+
+Makes the frontlight easier to adjust while reading:
+
+![Edge slider and light panel](docs/light-control.png)
+
+- **Absolute edge swipes:** swiping along the left edge (brightness) or the right edge (warmth),
+  KOReader's default light gestures, sets the level to where the finger stops — top of the
+  screen is the maximum, bottom the minimum — instead of nudging it a few steps.
+- **Visible slider:** a large slider with the current level shows up on that edge. Tap or drag
+  on it to fine-tune; it closes after a few seconds without touching, or with a tap elsewhere.
+- **Presets:** brightness and warmth together in one tap. *Day*, *Evening*, *Night* and *Dark*
+  come ready, the current light can be saved as a new one, and holding a preset removes it.
+- **Light panel:** both sliders and the presets on one card, from the menu or a gesture
+  (*Light panel* action).
+
+Everything is in *Settings → Light presets*, including turning the absolute swipes or the slider
+off and how many seconds the slider stays open.
 
 ---
 
