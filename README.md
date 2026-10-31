@@ -24,6 +24,7 @@ Patches with options have a configuration table right below that block.
 | [`2-physical-pages.lua`](#2-physical-pageslua) | Page numbers that match the printed edition |
 | [`2-highlights.lua`](#2-highlightslua) | Highlight categories readable in grayscale, plus filter shortcuts |
 | [`2-reading-dates.lua`](#2-reading-dateslua) | Start and finish date of every book |
+| [`2-progress-bar.lua`](#2-progress-barlua) | Progress bar styles for the status bar while reading |
 
 ---
 
@@ -39,18 +40,31 @@ that represent folders, and reading information shows up as small badges.
 - **One aspect ratio (2:3)** for books, folder thumbnails and the generated covers of books
   without an image. Very wide covers are centered on a gray background instead of distorted.
 - **Rounded corners** drawn by the patch itself, no extra icon files needed.
-- **Badges**, each in its own corner:
+- **Reading badges** you can mix and match, with four presets to start from:
 
-  | Corner | Badge |
-  |---|---|
-  | top left | series number (`#2`) and, below it, a star if the book is in a collection |
-  | top right | percentage read |
-  | bottom left | page count, for books not opened yet |
-  | bottom right | dog-ear: black for finished, white for abandoned |
+![Badge presets: Classic, Medals, Quest and Rings](docs/cover-grid-presets.png)
 
-- Option to fade the covers of finished books.
+Everything is set in *Project: Title settings → Cover badges*:
 
-Requires Project: Title in *Cover Grid* mode. Everything can be tuned in the `CONFIG` table.
+| Option | Choices |
+|---|---|
+| Apply a preset | Classic, Medals, Quest, Rings |
+| Progress | badge (with a flame), XP bar, XP bar and badge, ring, hidden |
+| Finished / on hold | medal (trophy), award, stamp, ribbon, banner, check, dog-ear, hidden — see below |
+| Badge size | small, medium, large |
+| Icons inside badges | flame, hourglass and book icons on or off |
+| Series number | `#2` on the top left |
+| Page count on new books | page count on books not opened yet |
+| Collection star | star on books that are in a collection |
+| Fade finished covers | lightens the covers of finished books |
+| Idle after | days without opening a book in progress before its progress turns into an hourglass (gray bar or ring); 0 turns it off |
+
+![Finished and on hold marks](docs/cover-grid-status.png)
+
+The idle mark is only visual: the book status stays *Reading*. Defaults for every option, plus
+aspect ratio and corner radius, live in the `CONFIG` table at the top of the file.
+
+Requires Project: Title in *Cover Grid* mode. Icons from [Tabler Icons](https://tabler.io/icons) (MIT).
 
 ---
 
@@ -102,6 +116,25 @@ manager.
 
 ---
 
+### `2-progress-bar.lua`
+
+New looks for the status bar progress bar while reading, chosen in
+*Status bar → Progress bar → Style*:
+
+![Progress bar styles](docs/progress-bar-styles.png)
+
+- **Rounded:** one rounded bar with a small gap where each chapter starts.
+- **Segments:** one block per chapter, like quest stages — chapters already read are filled
+  and the current one fills up as you read.
+- **Dual (session and book):** the thin line marks the stretch read in this session, from the
+  page where you opened the book to the current one; the bar below shows the whole book.
+- **KOReader default** keeps the original bar.
+
+Chapters come from the first level of the table of contents. A taller bar (*Thickness, height
+& colors*) suits the dual style.
+
+---
+
 ## Development
 
 The [`dev/`](dev) folder holds what is used to test the patches in a KOReader emulator
@@ -117,6 +150,8 @@ These patches were rewritten from community ideas:
 - **SeriousHornet** — [KOReader.patches](https://github.com/SeriousHornet/KOReader.patches):
   rounded and stretched covers, page, percentage, series, collection and status badges.
   Basis for `2-cover-grid.lua`.
+- **Paweł Kuna** — [Tabler Icons](https://github.com/tabler/tabler-icons) (MIT): trophy, pause,
+  flame, hourglass and book shapes used by `2-cover-grid.lua`.
 - **dmalinovsky** — `2-logical-page-count.lua` gist: synthetic pages by character count.
   Starting point for `2-physical-pages.lua`.
 - **Kaya** — Statistics plugin fork with `applyPerfectSync`, which matched page numbers to a
