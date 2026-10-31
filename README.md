@@ -201,10 +201,11 @@ author, current chapter, a progress bar with chapter marks, the time left in the
 the reading streak. In the file manager nothing changes — the wallpaper set in the sleep screen
 settings is used, for example a random image from a folder.
 
-![Sleep screen layouts](docs/sleep-screen-layouts.png)
+![Sleep screen layouts and detail positions](docs/sleep-screen-layouts.png)
 
 Options in *Settings → Screen → Sleep screen → Book card while reading*: turn it on or off,
-choose the layout (*Card*, *Poster* or *Night*) and show or hide the streak.
+choose the layout (*Card*, *Poster* or *Night*), put the details below, above or beside the
+cover, and show or hide the streak.
 
 - The card replaces the *random image* and *book cover* wallpapers only while reading; the
   other wallpaper types are left alone.

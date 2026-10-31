@@ -11,8 +11,9 @@ What it does:
     chapter (from Reading statistics) and the current reading streak.
   - In the file manager: nothing changes, the wallpaper chosen in the sleep screen
     settings is used (for example a random image from a folder).
-  - Three layouts: "card" (cover on white with the details below), "poster" (cover
-    filling the screen with a details panel over it) and "night" (white on black).
+  - Three layouts: "card" (cover and details on white), "poster" (cover filling the
+    screen with a details panel over it) and "night" (white on black). The details
+    go below, above or beside the cover.
   - Books marked "exclude from sleep screen" and books without a cover keep the
     regular wallpaper.
 
@@ -21,13 +22,14 @@ Usage:
   2. Settings → Screen → Sleep screen → Wallpaper: pick "Show random image from
      folder" (or "Show book cover") — the card replaces it only while reading.
   3. Settings → Screen → Sleep screen → Book card while reading: on/off, layout,
-     streak.
+     where the details go, streak.
 ]]
 
 local CONFIG = {
     defaults = {
         enabled = true,
         layout = "card",  -- "card", "poster" or "night"
+        details = "below", -- "below", "above" or "beside" the cover
         streak = true,    -- show the reading streak
     },
     corner_radius = 18,   -- rounded corners of the cover and panels, before DPI scaling
@@ -37,6 +39,12 @@ local LAYOUTS = {
     { "Card", "card" },
     { "Poster", "poster" },
     { "Night", "night" },
+}
+
+local PLACES = {
+    { "Below the cover", "below" },
+    { "Above the cover", "above" },
+    { "Beside the cover", "beside" },
 }
 
 local Blitbuffer = require("ffi/blitbuffer")
@@ -256,49 +264,82 @@ function BookCard:paintDetails(bb, x, top, w, fg, muted, track, bg)
     if info.streak and info.streak > 0 then
         table.insert(stats, T("%1-day streak", info.streak))
     end
-    put(table.concat(stats, "  ·  "), 19, { fg = muted, after = 0 })
+    local narrow = w < Screen:scaleBySize(380)
+    put(table.concat(stats, narrow and "\n" or "  ·  "), 19, { fg = muted, after = 0 })
     return y - top
 end
 
--- Cover on white, details below
-function BookCard:paintCardLayout(bb, x, y)
-    local w, h = self.width, self.height
-    local m = Screen:scaleBySize(36)
-    bb:paintRect(x, y, w, h, WHITE)
-    local cover_h = math.floor(h * 0.56)
-    self:paintCover(bb, x + math.floor(w / 2), y + m * 2, w - 4 * m, cover_h, WHITE, BLACK)
-    self:paintDetails(bb, x + m, y + m * 3 + cover_h, w - 2 * m, BLACK, GRAY, LIGHT, WHITE)
+-- Size of the cover once scaled to fit max_w × max_h
+function BookCard:coverSize(max_w, max_h)
+    local scale = math.min(max_w / self.cover:getWidth(), max_h / self.cover:getHeight())
+    return math.floor(self.cover:getWidth() * scale), math.floor(self.cover:getHeight() * scale)
 end
 
--- Cover filling the screen, details on a white panel at the bottom
-function BookCard:paintPosterLayout(bb, x, y)
+-- Renders the details off-screen at width w; returns the buffer and the height used
+function BookCard:renderDetails(w, colors, bb_type)
+    local scratch = Blitbuffer.new(w, self.height, bb_type)
+    scratch:fill(colors.bg)
+    local used = self:paintDetails(scratch, 0, 0, w, colors.fg, colors.muted, colors.track, colors.bg)
+    return scratch, used
+end
+
+-- Cover and details on a plain background, with the details below, above or beside the cover
+function BookCard:paintPlainLayout(bb, x, y, colors)
     local w, h = self.width, self.height
-    local m = Screen:scaleBySize(28)
-    bb:paintRect(x, y, w, h, Blitbuffer.COLOR_GRAY_3)
-    self:paintCover(bb, x + math.floor(w / 2), y, w, h, Blitbuffer.COLOR_GRAY_3, Blitbuffer.COLOR_GRAY_3)
-    local pad = Screen:scaleBySize(24)
-    local inner_w = w - 2 * m - 2 * pad
-    local scratch = Blitbuffer.new(inner_w, h, bb:getType())
-    scratch:fill(WHITE)
-    local used = self:paintDetails(scratch, 0, 0, inner_w, BLACK, GRAY, LIGHT, WHITE)
-    local panel_h = used + 2 * pad
-    local px, py = x + m, y + h - m - panel_h
-    local r = Screen:scaleBySize(CONFIG.corner_radius)
-    bb:paintRoundedRect(px, py, w - 2 * m, panel_h, WHITE, r)
-    bb:blitFrom(scratch, px + pad, py + pad, 0, 0, inner_w, used)
-    bb:paintBorder(px, py, w - 2 * m, panel_h, Screen:scaleBySize(1), BLACK, r)
+    local m = Screen:scaleBySize(36)
+    local place = opt("details")
+    bb:paintRect(x, y, w, h, colors.bg)
+    if place == "beside" then
+        local col_w = math.floor((w - 3 * m) / 2)
+        local cw, ch = self:coverSize(col_w, h - 4 * m)
+        self:paintCover(bb, x + m + math.floor(col_w / 2), y + math.floor((h - ch) / 2), col_w, h - 4 * m,
+            colors.bg, colors.border)
+        local text_w = w - 3 * m - col_w
+        local scratch, used = self:renderDetails(text_w, colors, bb:getType())
+        bb:blitFrom(scratch, x + 2 * m + col_w, y + math.floor((h - used) / 2), 0, 0, text_w, used)
+        scratch:free()
+        return
+    end
+    local scratch, used = self:renderDetails(w - 2 * m, colors, bb:getType())
+    local cover_max_h = h - used - 6 * m
+    local cw, ch = self:coverSize(w - 4 * m, math.min(cover_max_h, math.floor(h * 0.6)))
+    local block = ch + 2 * m + used
+    local top = y + math.floor((h - block) / 2)
+    if place == "above" then
+        bb:blitFrom(scratch, x + m, top, 0, 0, w - 2 * m, used)
+        self:paintCover(bb, x + math.floor(w / 2), top + used + 2 * m, w - 4 * m, ch, colors.bg, colors.border)
+    else
+        self:paintCover(bb, x + math.floor(w / 2), top, w - 4 * m, ch, colors.bg, colors.border)
+        bb:blitFrom(scratch, x + m, top + ch + 2 * m, 0, 0, w - 2 * m, used)
+    end
     scratch:free()
 end
 
--- White text on black, cover on top
-function BookCard:paintNightLayout(bb, x, y)
+-- Cover filling the screen, details on a white panel at the bottom, top or right side
+function BookCard:paintPosterLayout(bb, x, y)
     local w, h = self.width, self.height
-    local m = Screen:scaleBySize(36)
-    bb:paintRect(x, y, w, h, BLACK)
-    local cover_h = math.floor(h * 0.56)
-    self:paintCover(bb, x + math.floor(w / 2), y + m * 2, w - 4 * m, cover_h, BLACK, WHITE)
-    self:paintDetails(bb, x + m, y + m * 3 + cover_h, w - 2 * m, WHITE, Blitbuffer.COLOR_GRAY_B,
-        Blitbuffer.COLOR_GRAY_4, BLACK)
+    local m = Screen:scaleBySize(28)
+    local pad = Screen:scaleBySize(24)
+    local back = Blitbuffer.COLOR_GRAY_3
+    bb:paintRect(x, y, w, h, back)
+    self:paintCover(bb, x + math.floor(w / 2), y, w, h, back, back)
+    local place = opt("details")
+    local panel_w = place == "beside" and math.floor(w * 0.46) or w - 2 * m
+    local inner_w = panel_w - 2 * pad
+    local colors = { fg = BLACK, muted = GRAY, track = LIGHT, bg = WHITE }
+    local scratch, used = self:renderDetails(inner_w, colors, bb:getType())
+    local panel_h = used + 2 * pad
+    local px, py = x + m, y + h - m - panel_h
+    if place == "above" then
+        py = y + m
+    elseif place == "beside" then
+        px, py = x + w - m - panel_w, y + math.floor((h - panel_h) / 2)
+    end
+    local r = Screen:scaleBySize(CONFIG.corner_radius)
+    bb:paintRoundedRect(px, py, panel_w, panel_h, WHITE, r)
+    bb:blitFrom(scratch, px + pad, py + pad, 0, 0, inner_w, used)
+    bb:paintBorder(px, py, panel_w, panel_h, Screen:scaleBySize(1), BLACK, r)
+    scratch:free()
 end
 
 -- Draws the chosen layout
@@ -307,9 +348,10 @@ function BookCard:paintTo(bb, x, y)
     if self.layout == "poster" then
         self:paintPosterLayout(bb, x, y)
     elseif self.layout == "night" then
-        self:paintNightLayout(bb, x, y)
+        self:paintPlainLayout(bb, x, y, { fg = WHITE, muted = Blitbuffer.COLOR_GRAY_B,
+            track = Blitbuffer.COLOR_GRAY_4, bg = BLACK, border = WHITE })
     else
-        self:paintCardLayout(bb, x, y)
+        self:paintPlainLayout(bb, x, y, { fg = BLACK, muted = GRAY, track = LIGHT, bg = WHITE, border = BLACK })
     end
 end
 
@@ -385,6 +427,15 @@ local function cardMenu()
             callback = function() setOpt("layout", l[2]) end,
         })
     end
+    local place_items = {}
+    for __, d in ipairs(PLACES) do
+        table.insert(place_items, {
+            text = d[1],
+            radio = true,
+            checked_func = function() return opt("details") == d[2] end,
+            callback = function() setOpt("details", d[2]) end,
+        })
+    end
     return {
         text = "Book card while reading",
         sub_item_table = {
@@ -403,6 +454,16 @@ local function cardMenu()
                 end,
                 enabled_func = function() return opt("enabled") end,
                 sub_item_table = layout_items,
+            },
+            {
+                text_func = function()
+                    for __, d in ipairs(PLACES) do
+                        if d[2] == opt("details") then return T("Details: %1", d[1]) end
+                    end
+                    return "Details"
+                end,
+                enabled_func = function() return opt("enabled") end,
+                sub_item_table = place_items,
             },
             {
                 text = "Show reading streak",
