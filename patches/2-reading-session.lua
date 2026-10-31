@@ -8,6 +8,16 @@ a while without hunting for where you were.
 What it does:
   - Session summary: when you close a book, a short message shows the time
     read, pages read, how the percentage moved and the chapters you finished.
+    Pages read count from the page where you opened the book: that page is
+    zero, so going forward two pages and back two to check something counts as
+    nothing, and going back before it shows zero. A jump (table of contents,
+    link, go to page) moves the starting point along with you, so only pages
+    turned one by one count, wherever they are. Finished chapters work the
+    same way. Only page turns count (taps, swipes, keys, scrolling), so
+    changing the font or the layout doesn't count either; scroll mode and the
+    two-page mode work too. The summary
+    only shows after a minimum of pages and/or minutes, chosen from presets or
+    set by hand.
   - Daily goal and streak: set a goal in pages or minutes per day. The summary
     shows today's total against the goal and how many days in a row you hit it.
     Totals come from the Reading statistics plugin, so they count every book.
@@ -31,9 +41,12 @@ local CONFIG = {
         recap_days = 7,      -- days without opening a book before the recap shows
         goal_type = "pages", -- "pages" or "minutes"
         goal = 30,           -- daily goal, in pages or minutes
+        summary_pages = 5,   -- pages read (net) before the summary shows
+        summary_minutes = 0, -- minutes read before the summary shows
     },
+    -- Ready-made minimums for the summary: {pages, minutes}
+    summary_presets = { { 1, 0 }, { 5, 0 }, { 10, 0 }, { 5, 5 }, { 10, 10 }, { 0, 15 } },
     max_page_secs = 120,     -- time on a single page counted at most (same idea as Reading statistics)
-    min_session_pages = 2,   -- sessions shorter than this don't show a summary
     recap_highlights = 3,    -- how many recent highlights / notes the recap lists
 }
 
@@ -75,6 +88,14 @@ end
 -- "1 page" / "3 pages"
 local function plural(n, word)
     return n .. " " .. word .. (n == 1 and "" or "s")
+end
+
+-- "5 pages and 5 min", "10 pages", "15 min" or "every session"
+local function minimumText(pages, minutes)
+    if pages > 0 and minutes > 0 then return T("%1 and %2 min", plural(pages, "page"), minutes) end
+    if pages > 0 then return plural(pages, "page") end
+    if minutes > 0 then return T("%1 min", minutes) end
+    return "every session"
 end
 
 -- Fraction of the book read up to the current page
@@ -163,14 +184,15 @@ function ReadingSession:init()
     self.start_time = os.time()
     self.last_turn = self.start_time
     self.read_secs = 0
-    self.pages_seen = {}
     self.page_count = 0
+    self.chapter_count = 0
     self.ui.menu:registerToMainMenu(self)
 end
 
 -- Records where the session started and shows the recap if the book was left aside
 function ReadingSession:onReaderReady()
     self.start_page = self.ui:getCurrentPage()
+    self.last_page = self.start_page
     self.start_percent = progress(self.ui)
     local days = opt("recap_days")
     if opt("recap") and self.last_closed and self.start_percent > 0 and days > 0
@@ -179,14 +201,61 @@ function ReadingSession:onReaderReady()
     end
 end
 
--- Counts each page turn and the time spent on the previous page
+-- Page numbers shown at once: 2 in the two-page mode of EPUBs when each side has its own number
+local function visibleNumbers(ui)
+    local doc = ui.document
+    return doc and doc.getVisiblePageNumberCount and doc:getVisiblePageNumberCount() or 1
+end
+
+-- Number of top-level chapter starts in (lo, hi]
+local function chapterStartsBetween(ui, lo, hi)
+    local n = 0
+    for _i, s in ipairs(chapterStarts(ui)) do
+        if s > lo and s <= hi then n = n + 1 end
+    end
+    return n
+end
+
+-- Adds the time spent on the previous page; while a page is being turned, moving forward counts the
+-- pages and moving back takes them off, so the count is how far past the opening page you are; any
+-- other move (jumps, font or layout changes) only moves the starting point along with you;
+-- chapters entered by turning count the same way
 function ReadingSession:onPageUpdate(pageno)
     local now = os.time()
     self.read_secs = self.read_secs + math.min(now - self.last_turn, CONFIG.max_page_secs)
     self.last_turn = now
-    if pageno and not self.pages_seen[pageno] then
-        self.pages_seen[pageno] = true
-        self.page_count = self.page_count + 1
+    if not pageno then return end
+    if self.turning and self.last_page and pageno ~= self.last_page then
+        local step = pageno - self.last_page
+        local extra = visibleNumbers(self.ui) - 1
+        local chapters = chapterStartsBetween(self.ui, math.min(pageno, self.last_page) + extra,
+            math.max(pageno, self.last_page) + extra)
+        self.page_count = self.page_count + step
+        self.chapter_count = self.chapter_count + (step > 0 and chapters or -chapters)
+    end
+    self.last_page = pageno
+end
+
+-- Scroll mode reports positions instead of pages; a new page at the top counts like a turn
+function ReadingSession:onPosUpdate(_pos, pageno)
+    if pageno and pageno ~= self.last_page then self:onPageUpdate(pageno) end
+end
+
+-- Marks the page turns of the reader (taps, swipes, keys, scrolling) so only they count as reading
+function ReadingSession:watchTurns()
+    local mover = self.ui.rolling or self.ui.paging
+    if not mover then return end
+    for _i, name in ipairs({ "onGotoViewRel", "onPan", "onPanRelease", "onPanning" }) do
+        local orig = mover[name]
+        if orig then
+            mover[name] = function(...)
+                self.turning = true
+                local ok, result = pcall(orig, ...)
+                self.turning = false
+                if not ok then error(result, 0) end
+                return result
+            end
+        end
     end
 end
 
@@ -234,20 +303,20 @@ end
 function ReadingSession:onCloseDocument()
     if not opt("summary") then return end
     self:onPageUpdate(nil)
-    if self.page_count < CONFIG.min_session_pages then return end
+    local pages = math.max(0, self.page_count)
+    if pages < math.max(1, opt("summary_pages")) then return end
+    if self.read_secs < opt("summary_minutes") * 60 then return end
     local ui = self.ui
-    local end_page = ui:getCurrentPage()
     local end_percent = progress(ui)
-    local finished_chapters = 0
-    for _i, s in ipairs(chapterStarts(ui)) do
-        if s > self.start_page and s <= end_page then finished_chapters = finished_chapters + 1 end
-    end
+    -- Where the session started once jumps are taken out, so the percentage moves with them too
+    local total = ui.document:getPageCount()
+    local from_percent = total > 0 and (self.last_page - self.page_count) / total or self.start_percent
     local data = {
         secs = self.read_secs,
-        pages = self.page_count,
-        from = math.floor(self.start_percent * 100),
+        pages = pages,
+        from = math.floor(from_percent * 100),
         to = math.floor(end_percent * 100),
-        chapters = finished_chapters,
+        chapters = math.max(0, self.chapter_count),
     }
     UIManager:scheduleIn(0.5, function() self.showSummary(data) end)
 end
@@ -268,6 +337,57 @@ function ReadingSession.showSummary(data)
         table.insert(lines, goal)
     end
     UIManager:show(InfoMessage:new { text = table.concat(lines, "\n"), timeout = 8, show_icon = false })
+end
+
+-- Opens a number picker for one of the summary minimums
+local function askMinimum(key, title, max, touchmenu)
+    UIManager:show(SpinWidget:new {
+        title_text = title,
+        value = opt(key),
+        value_min = 0,
+        value_max = max,
+        value_step = 1,
+        value_hold_step = 5,
+        default_value = CONFIG.defaults[key],
+        ok_always_enabled = true,
+        callback = function(spin)
+            setOpt(key, spin.value)
+            touchmenu:updateItems()
+        end,
+    })
+end
+
+-- Submenu with the summary minimum presets and the two values to set by hand
+local function summaryMinimumMenu()
+    local items = {}
+    for _i, p in ipairs(CONFIG.summary_presets) do
+        table.insert(items, {
+            text = minimumText(p[1], p[2]),
+            radio = true,
+            checked_func = function() return opt("summary_pages") == p[1] and opt("summary_minutes") == p[2] end,
+            callback = function()
+                setOpt("summary_pages", p[1])
+                setOpt("summary_minutes", p[2])
+            end,
+        })
+    end
+    items[#items].separator = true
+    table.insert(items, {
+        text_func = function() return T("Minimum pages: %1", opt("summary_pages")) end,
+        keep_menu_open = true,
+        callback = function(touchmenu) askMinimum("summary_pages", "Minimum pages", 200, touchmenu) end,
+    })
+    table.insert(items, {
+        text_func = function() return T("Minimum minutes: %1", opt("summary_minutes")) end,
+        keep_menu_open = true,
+        callback = function(touchmenu) askMinimum("summary_minutes", "Minimum minutes", 120, touchmenu) end,
+        separator = true,
+    })
+    table.insert(items, {
+        text = "Pages count net: turning back takes one off",
+        enabled_func = function() return false end,
+    })
+    return items
 end
 
 -- Adds Tools → Reading session
@@ -325,6 +445,13 @@ function ReadingSession:addToMainMenu(menu_items)
                 callback = function() setOpt("summary", not opt("summary")) end,
             },
             {
+                text_func = function()
+                    return "Show it after: " .. minimumText(opt("summary_pages"), opt("summary_minutes"))
+                end,
+                enabled_func = function() return opt("summary") end,
+                sub_item_table_func = summaryMinimumMenu,
+            },
+            {
                 text = "Recap when coming back to a book",
                 checked_func = function() return opt("recap") end,
                 callback = function() setOpt("recap", not opt("recap")) end,
@@ -377,5 +504,6 @@ ReaderUI.init = function(self, ...)
     orig_init(self, ...)
     local session = ReadingSession:new { ui = self, last_closed = last_closed }
     self:registerModule("reading_session", session)
+    session:watchTurns()
     session:onReaderReady()
 end

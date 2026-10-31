@@ -164,7 +164,14 @@ Makes each reading session count, in three parts that can be turned on or off:
 ![Session summary and recap](docs/reading-session.png)
 
 - **Session summary:** when you close a book, a message shows the time read, the pages read,
-  how the percentage moved and how many chapters you finished.
+  how the percentage moved and how many chapters you finished. Pages count from where you opened
+  the book: that page is zero, so going forward two pages and back two to check something counts
+  as nothing, and going back before it shows zero. A jump (table of contents, link, go to page)
+  moves the starting point along with you, so only page turns count (taps, swipes, keys or
+  scrolling); changing the font or the layout doesn't count either. Scroll mode and the
+  two-page mode work too. It only shows after a minimum of pages
+  and/or minutes, picked from presets (1, 5 or 10 pages, 5 pages and 5 min, 10 pages and
+  10 min, 15 min) or set by hand. The default is 5 pages.
 - **Daily goal and streak:** a goal in pages or minutes per day. The summary shows today's
   total against the goal and how many days in a row you reached it. Totals come from the
   *Reading statistics* plugin, so they add up every book read that day.
