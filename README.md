@@ -255,7 +255,7 @@ statistics plugin.
 
 Makes the frontlight easier to adjust while reading:
 
-![Edge slider and light panel](docs/light-control.png)
+![Edge sliders, light panel and automatic presets](docs/light-control.png)
 
 - **Absolute edge swipes:** swiping along the left edge (brightness) or the right edge (warmth),
   KOReader's default light gestures, sets the level to where the finger stops — top of the
@@ -267,9 +267,16 @@ Makes the frontlight easier to adjust while reading:
   (from the current light or typed in), rename it or remove it.
 - **Light panel:** both sliders and the presets on one card, from the menu or a gesture
   (*Light panel* action).
+- **Automatic presets:** a schedule of times, each starting a preset that lasts until the next
+  time — for example *Day* at 07:00, *Evening* at 18:00 and *Night* at 22:00. Each time takes
+  only one preset, so they never overlap. The preset is applied when its time arrives or when the
+  device wakes up in a new period; changing the light by hand keeps your choice until the next
+  time on the schedule. *Change gradually* blends the light into the next preset over the minutes
+  before it starts (30 by default), and stops blending if you adjust the light yourself.
 
-Everything is in *Settings → Light presets*, including turning the absolute swipes or the slider
-off and how many seconds the slider stays open.
+Everything is in *Settings → Light presets*, including the schedule (*Automatic presets*, off
+until you turn it on), turning the absolute swipes or the slider off and how many seconds the
+slider stays open.
 
 ---
 

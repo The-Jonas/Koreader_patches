@@ -16,6 +16,11 @@ What it does:
     Evening, Night, Dark); the current light can be saved as a new one, and
     holding a preset lets you change its values, rename it or remove it.
   - "Light panel" gesture action: both sliders side by side plus the presets.
+  - Automatic presets: a schedule of times, each starting a preset that lasts
+    until the next time (one preset per time, so they never overlap). The preset
+    is applied when its time arrives or when the device wakes up in a new period;
+    changing the light by hand keeps your choice until the next time on the
+    schedule. Optionally the light blends into the next preset gradually.
 
 Usage:
   1. Copy this file to koreader/patches/ and restart KOReader.
@@ -23,7 +28,7 @@ Usage:
      KOReader's default light gestures. To use other gestures, assign the usual
      "Increase/Decrease frontlight brightness/warmth" actions to them.
   3. Presets and options (absolute swipes, slider on/off, how long it stays):
-     Settings → Light presets. To open the light panel with a
+     Settings → Light presets. The schedule is in Light presets → Automatic presets. To open the light panel with a
      gesture, assign "Light panel" in Taps and gestures → Gesture manager.
 ]]
 
@@ -31,6 +36,15 @@ local CONFIG = {
     absolute_swipes = true, -- edge swipes set the level where the finger stops
     show_slider = true,     -- show the slider after a light gesture
     slider_seconds = 3,     -- seconds without touching before the slider closes
+    auto = false,           -- follow the schedule below
+    gradual = false,        -- blend into the next preset instead of switching at once
+    gradual_minutes = 30,   -- how long the blend takes, ending at the scheduled time
+    -- Schedule: from each time on, until the next one, that preset applies
+    schedule = {
+        { time = "07:00", preset = "Day" },
+        { time = "18:00", preset = "Evening" },
+        { time = "22:00", preset = "Night" },
+    },
     -- Presets ready on first use: brightness and warmth in percent
     presets = {
         { name = "Day", brightness = 60, warmth = 0 },
@@ -60,15 +74,19 @@ local DeviceListener = require("device/devicelistener")
 local BLACK, WHITE = Blitbuffer.COLOR_BLACK, Blitbuffer.COLOR_WHITE
 local MUTED, TRACK = Blitbuffer.Color8(0x66), Blitbuffer.Color8(0xDD)
 
--- Saved options and presets, falling back to CONFIG
 local editPreset
 
+-- Saved options, presets and schedule, falling back to CONFIG
 local function store()
     local s = G_reader_settings:readSetting("light_control") or {}
     if s.presets == nil then s.presets = util.tableDeepCopy(CONFIG.presets) end
     if s.absolute_swipes == nil then s.absolute_swipes = CONFIG.absolute_swipes end
     if s.show_slider == nil then s.show_slider = CONFIG.show_slider end
     if s.slider_seconds == nil then s.slider_seconds = CONFIG.slider_seconds end
+    if s.schedule == nil then s.schedule = util.tableDeepCopy(CONFIG.schedule) end
+    if s.auto == nil then s.auto = CONFIG.auto end
+    if s.gradual == nil then s.gradual = CONFIG.gradual end
+    if s.gradual_minutes == nil then s.gradual_minutes = CONFIG.gradual_minutes end
     return s
 end
 
@@ -401,6 +419,114 @@ Dispatcher:registerAction("light_panel", {
 })
 DeviceListener.onShowLightPanel = function() showPanel() return true end
 
+---------------------------------------------------------------- schedule
+
+-- Minutes since midnight for "HH:MM"
+local function toMinutes(hhmm)
+    local h, m = hhmm:match("^(%d+):(%d+)$")
+    return tonumber(h) * 60 + tonumber(m)
+end
+
+-- Schedule entries sorted by time
+local function sortedSchedule(s)
+    local list = util.tableDeepCopy(s.schedule)
+    table.sort(list, function(a, b) return toMinutes(a.time) < toMinutes(b.time) end)
+    return list
+end
+
+-- Preset with the given name, or nil
+local function findPreset(s, name)
+    for __, p in ipairs(s.presets) do
+        if p.name == name then return p end
+    end
+end
+
+-- The period running now: its entry, a key unique to this start, and the next entry
+-- with the minutes left until it
+local function currentPeriod(s)
+    local list = sortedSchedule(s)
+    if #list == 0 then return end
+    local now = os.time()
+    local t = os.date("*t", now)
+    local mins = t.hour * 60 + t.min
+    local idx, day = #list, now - 86400
+    for i = #list, 1, -1 do
+        if toMinutes(list[i].time) <= mins then idx, day = i, now break end
+    end
+    local entry = list[idx]
+    local nxt = list[idx % #list + 1]
+    local to_next = (toMinutes(nxt.time) - mins) % 1440
+    if to_next == 0 then to_next = 1440 end
+    return entry, os.date("%Y-%m-%d ", day) .. entry.time, nxt, to_next
+end
+
+local last_set -- light values the schedule set last, to notice manual changes
+
+-- Current light in percent
+local function currentLight()
+    return { brightness = math.floor(getBrightness() * 100 + 0.5), warmth = math.floor(getWarmth() * 100 + 0.5) }
+end
+
+-- Sets the light to the given percentages and remembers them
+local function setLight(v)
+    setBrightness(v.brightness / 100)
+    if has_warmth then setWarmth(v.warmth / 100) end
+    last_set = currentLight()
+end
+
+-- Whether the light was changed by hand since the schedule last set it
+local function changedByHand()
+    if not last_set then return false end
+    local now = currentLight()
+    return math.abs(now.brightness - last_set.brightness) > 2 or math.abs(now.warmth - last_set.warmth) > 2
+end
+
+-- Applies the schedule: the preset of a new period once, and the gradual blend before the next one
+local function checkSchedule()
+    local s = store()
+    if not s.auto then return end
+    local entry, key, nxt, to_next = currentPeriod(s)
+    if not entry then return end
+    if s.applied_key ~= key then
+        local p = findPreset(s, entry.preset)
+        s.applied_key, s.blend_from = key, nil
+        save(s)
+        if p then setLight(p) end
+        return
+    end
+    if not s.gradual or to_next > s.gradual_minutes then return end
+    local target = findPreset(s, nxt.preset)
+    if not target or s.blend_off == key then return end
+    if s.blend_from == nil then
+        s.blend_from = currentLight()
+        save(s)
+    elseif changedByHand() then
+        s.blend_off = key
+        save(s)
+        return
+    end
+    local f = 1 - to_next / s.gradual_minutes
+    local from = s.blend_from
+    setLight({
+        brightness = math.floor(from.brightness + (target.brightness - from.brightness) * f + 0.5),
+        warmth = math.floor(from.warmth + (target.warmth - from.warmth) * f + 0.5),
+    })
+end
+
+-- Checks the schedule every minute while KOReader runs
+local function tick()
+    pcall(checkSchedule)
+    UIManager:scheduleIn(60, tick)
+end
+UIManager:scheduleIn(5, tick)
+
+-- Checks the schedule right after the device wakes up
+local orig_resume = DeviceListener.onResume
+DeviceListener.onResume = function(self, ...)
+    UIManager:scheduleIn(1.5, function() pcall(checkSchedule) end)
+    if orig_resume then return orig_resume(self, ...) end
+end
+
 ---------------------------------------------------------------- menu
 
 -- Asks for a name and passes it to on_done (empty names are ignored)
@@ -473,7 +599,14 @@ editPreset = function(i, touchmenu)
     end
     table.insert(buttons, { { text = "Rename", callback = function()
         UIManager:close(dialog)
-        askName("Preset name", p.name, function(name) update(function(q) q.name = name end) end)
+        askName("Preset name", p.name, function(name)
+            local st = store()
+            for __, e in ipairs(st.schedule) do
+                if e.preset == p.name then e.preset = name end
+            end
+            save(st)
+            update(function(q) q.name = name end)
+        end)
     end } })
     table.insert(buttons, { { text = "Remove", callback = function()
         UIManager:close(dialog)
@@ -491,6 +624,183 @@ editPreset = function(i, touchmenu)
     end } })
     dialog = ButtonDialog:new { title = p.name, title_align = "center", buttons = buttons }
     UIManager:show(dialog)
+end
+
+-- Asks for a time of day and passes "HH:MM" to on_done
+local function askTime(title, hhmm, on_done)
+    local DateTimeWidget = require("ui/widget/datetimewidget")
+    local h, m = (hhmm or "12:00"):match("^(%d+):(%d+)$")
+    UIManager:show(DateTimeWidget:new {
+        hour = tonumber(h),
+        min = tonumber(m),
+        ok_text = "Set",
+        title_text = title,
+        callback = function(t) on_done(string.format("%02d:%02d", t.hour, t.min)) end,
+    })
+end
+
+-- Lets the user pick one of the presets and passes its name to on_done
+local function askPreset(on_done)
+    local ButtonDialog = require("ui/widget/buttondialog")
+    local dialog
+    local buttons = {}
+    for __, p in ipairs(store().presets) do
+        table.insert(buttons, { { text = p.name, callback = function()
+            UIManager:close(dialog)
+            on_done(p.name)
+        end } })
+    end
+    dialog = ButtonDialog:new { title = "Preset", title_align = "center", buttons = buttons }
+    UIManager:show(dialog)
+end
+
+-- Whether another schedule entry already starts at hhmm
+local function timeTaken(s, hhmm, except)
+    for __, e in ipairs(s.schedule) do
+        if e.time == hhmm and e.time ~= except then return true end
+    end
+    return false
+end
+
+-- Tells that a time is already used
+local function warnTaken(hhmm)
+    local InfoMessage = require("ui/widget/infomessage")
+    UIManager:show(InfoMessage:new { text = T("There is already a preset starting at %1. Each time can have only one.", hhmm) })
+end
+
+-- Saves the schedule, forgets which period was applied and checks it again
+local function saveSchedule(s)
+    s.applied_key = nil
+    save(s)
+    pcall(checkSchedule)
+end
+
+-- Dialog for one schedule entry: change its time or preset, or remove it
+local function editEntry(hhmm, touchmenu)
+    local ButtonDialog = require("ui/widget/buttondialog")
+    local dialog
+    -- Changes the entry starting at hhmm and refreshes the menu
+    local function update(fn)
+        local st = store()
+        for __, e in ipairs(st.schedule) do
+            if e.time == hhmm then fn(e, st) end
+        end
+        saveSchedule(st)
+        if touchmenu then touchmenu:backToUpperMenu() end
+    end
+    dialog = ButtonDialog:new {
+        title = hhmm,
+        title_align = "center",
+        buttons = {
+            { { text = "Change the time", callback = function()
+                UIManager:close(dialog)
+                askTime("Starts at", hhmm, function(new)
+                    if timeTaken(store(), new, hhmm) then return warnTaken(new) end
+                    update(function(e) e.time = new end)
+                end)
+            end } },
+            { { text = "Change the preset", callback = function()
+                UIManager:close(dialog)
+                askPreset(function(name) update(function(e) e.preset = name end) end)
+            end } },
+            { { text = "Remove", callback = function()
+                UIManager:close(dialog)
+                local st = store()
+                for i, e in ipairs(st.schedule) do
+                    if e.time == hhmm then table.remove(st.schedule, i) break end
+                end
+                saveSchedule(st)
+                if touchmenu then touchmenu:backToUpperMenu() end
+            end } },
+        },
+    }
+    UIManager:show(dialog)
+end
+
+-- Light presets → Automatic presets: on/off, the schedule and the gradual change
+local function scheduleMenu()
+    return {
+        text = "Automatic presets",
+        sub_item_table_func = function()
+            local s = store()
+            local items = {
+                {
+                    text = "Follow the schedule",
+                    checked_func = function() return store().auto end,
+                    callback = function()
+                        local st = store()
+                        st.auto = not st.auto
+                        saveSchedule(st)
+                    end,
+                    separator = true,
+                },
+            }
+            for __, e in ipairs(sortedSchedule(s)) do
+                table.insert(items, {
+                    text_func = function()
+                        local missing = not findPreset(store(), e.preset)
+                        return T("%1  →  %2%3", e.time, e.preset, missing and "  (preset removed)" or "")
+                    end,
+                    keep_menu_open = true,
+                    callback = function(touchmenu) editEntry(e.time, touchmenu) end,
+                })
+            end
+            table.insert(items, {
+                text = "Add a time",
+                keep_menu_open = true,
+                callback = function(touchmenu)
+                    askTime("Starts at", "12:00", function(hhmm)
+                        if timeTaken(store(), hhmm) then return warnTaken(hhmm) end
+                        askPreset(function(name)
+                            local st = store()
+                            table.insert(st.schedule, { time = hhmm, preset = name })
+                            saveSchedule(st)
+                            if touchmenu then touchmenu:backToUpperMenu() end
+                        end)
+                    end)
+                end,
+                separator = true,
+            })
+            table.insert(items, {
+                text = "Change gradually",
+                checked_func = function() return store().gradual end,
+                callback = function()
+                    local st = store()
+                    st.gradual = not st.gradual
+                    save(st)
+                end,
+            })
+            table.insert(items, {
+                text_func = function() return T("Gradual change takes: %1 min", store().gradual_minutes) end,
+                enabled_func = function() return store().gradual end,
+                keep_menu_open = true,
+                callback = function(touchmenu)
+                    local SpinWidget = require("ui/widget/spinwidget")
+                    UIManager:show(SpinWidget:new {
+                        title_text = "Gradual change (minutes)",
+                        value = store().gradual_minutes,
+                        value_min = 5,
+                        value_max = 120,
+                        value_step = 5,
+                        default_value = CONFIG.gradual_minutes,
+                        ok_always_enabled = true,
+                        callback = function(spin)
+                            local st = store()
+                            st.gradual_minutes = spin.value
+                            save(st)
+                            if touchmenu then touchmenu:updateItems() end
+                        end,
+                    })
+                end,
+                separator = true,
+            })
+            table.insert(items, {
+                text = "Each preset lasts until the next time. Changing the light by hand keeps it until then.",
+                enabled_func = function() return false end,
+            })
+            return items
+        end,
+    }
 end
 
 -- Settings → Light presets: apply, edit, save current, and options
@@ -528,6 +838,7 @@ local function presetsMenu()
                     end)
                 end,
             })
+            table.insert(items, scheduleMenu())
             table.insert(items, {
                 text = "Open the light panel",
                 callback = function() showPanel() end,
