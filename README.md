@@ -26,6 +26,7 @@ Patches with options have a configuration table right below that block.
 | [`2-reading-dates.lua`](#2-reading-dateslua) | Start and finish date of every book |
 | [`2-progress-bar.lua`](#2-progress-barlua) | Progress bar styles for the status bar while reading |
 | [`2-reading-session.lua`](#2-reading-sessionlua) | Session summary, daily goal with streak, and a recap when coming back to a book |
+| [`2-vocabulary-highlights.lua`](#2-vocabulary-highlightslua) | Highlights of the vocabulary color go to the Vocabulary builder |
 
 ---
 
@@ -168,6 +169,27 @@ Makes each reading session count, in three parts that can be turned on or off:
 
 Settings are in *Menu → Tools → Reading session*, while reading. The goal and the streak need
 the *Reading statistics* plugin enabled; the summary and the recap work without it.
+
+---
+
+### `2-vocabulary-highlights.lua`
+
+Collects new words with a single highlight: give a highlight the gray color (the
+*✎ Vocabulary* category of `2-highlights.lua`) and the word goes to KOReader's
+*Vocabulary builder*, ready for flashcard review with spaced repetition.
+
+![Words added from highlights in the Vocabulary builder](docs/vocabulary-highlights.png)
+
+- Works when the highlight is created gray and when an existing highlight is changed to gray.
+- The book title and the sentence around the word are saved as context, the same way a
+  dictionary lookup does it.
+- Highlights longer than four words are left out, and words already in the Vocabulary builder
+  are not reset.
+- *Menu → search tab → Vocabulary from highlights* turns the automatic adding on or off and
+  adds every gray highlight of the open book at once, for books highlighted earlier.
+
+The color and the word limit are in the `CONFIG` table. Needs the Vocabulary builder plugin,
+which is enabled by default.
 
 ---
 
