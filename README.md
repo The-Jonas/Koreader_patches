@@ -263,7 +263,8 @@ Makes the frontlight easier to adjust while reading:
 - **Visible slider:** a large slider with the current level shows up on that edge. Tap or drag
   on it to fine-tune; it closes after a few seconds without touching, or with a tap elsewhere.
 - **Presets:** brightness and warmth together in one tap. *Day*, *Evening*, *Night* and *Dark*
-  come ready, the current light can be saved as a new one, and holding a preset removes it.
+  come ready and the current light can be saved as a new one. Hold a preset to set its values
+  (from the current light or typed in), rename it or remove it.
 - **Light panel:** both sliders and the presets on one card, from the menu or a gesture
   (*Light panel* action).
 

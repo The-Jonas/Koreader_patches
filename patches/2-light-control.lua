@@ -13,7 +13,8 @@ What it does:
     to fine-tune; it closes by itself after a few seconds or with a tap elsewhere.
   - Light presets (brightness + warmth together), applied with one tap from
     Settings → Light presets or from the light panel. Four come ready (Day,
-    Evening, Night, Dark); the current light can be saved as a new one.
+    Evening, Night, Dark); the current light can be saved as a new one, and
+    holding a preset lets you change its values, rename it or remove it.
   - "Light panel" gesture action: both sliders side by side plus the presets.
 
 Usage:
@@ -60,6 +61,8 @@ local BLACK, WHITE = Blitbuffer.COLOR_BLACK, Blitbuffer.COLOR_WHITE
 local MUTED, TRACK = Blitbuffer.Color8(0x66), Blitbuffer.Color8(0xDD)
 
 -- Saved options and presets, falling back to CONFIG
+local editPreset
+
 local function store()
     local s = G_reader_settings:readSetting("light_control") or {}
     if s.presets == nil then s.presets = util.tableDeepCopy(CONFIG.presets) end
@@ -400,7 +403,97 @@ DeviceListener.onShowLightPanel = function() showPanel() return true end
 
 ---------------------------------------------------------------- menu
 
--- Settings → Light presets: apply, save current, remove, and options
+-- Asks for a name and passes it to on_done (empty names are ignored)
+local function askName(title, initial, on_done)
+    local InputDialog = require("ui/widget/inputdialog")
+    local dialog
+    dialog = InputDialog:new {
+        title = title,
+        input = initial,
+        buttons = { {
+            { text = _("Cancel"), id = "close", callback = function() UIManager:close(dialog) end },
+            { text = _("Save"), is_enter_default = true, callback = function()
+                local name = dialog:getInputText()
+                UIManager:close(dialog)
+                if name ~= "" then on_done(name) end
+            end },
+        } },
+    }
+    UIManager:show(dialog)
+    dialog:onShowKeyboard()
+end
+
+-- Asks for a percentage (0 to 100) and passes it to on_done
+local function askPercent(title, value, on_done)
+    local SpinWidget = require("ui/widget/spinwidget")
+    UIManager:show(SpinWidget:new {
+        title_text = title,
+        value = value,
+        value_min = 0,
+        value_max = 100,
+        value_step = 1,
+        value_hold_step = 10,
+        unit = "%",
+        ok_always_enabled = true,
+        callback = function(spin) on_done(spin.value) end,
+    })
+end
+
+-- Dialog to change preset i: light values, name or removal
+editPreset = function(i, touchmenu)
+    local p = store().presets[i]
+    if not p then return end
+    local ButtonDialog = require("ui/widget/buttondialog")
+    local dialog
+    -- Saves a change to preset i and refreshes the menu
+    local function update(fn)
+        local st = store()
+        if st.presets[i] then fn(st.presets[i]) end
+        save(st)
+        if touchmenu then touchmenu:updateItems() end
+    end
+    local buttons = {
+        { { text = "Use the current light", callback = function()
+            UIManager:close(dialog)
+            update(function(q)
+                q.brightness = math.floor(getBrightness() * 100 + 0.5)
+                q.warmth = math.floor(getWarmth() * 100 + 0.5)
+            end)
+        end } },
+        { { text = T("Brightness: %1%", p.brightness), callback = function()
+            UIManager:close(dialog)
+            askPercent("Brightness", p.brightness, function(v) update(function(q) q.brightness = v end) end)
+        end } },
+    }
+    if has_warmth then
+        table.insert(buttons, { { text = T("Warmth: %1%", p.warmth), callback = function()
+            UIManager:close(dialog)
+            askPercent("Warmth", p.warmth, function(v) update(function(q) q.warmth = v end) end)
+        end } })
+    end
+    table.insert(buttons, { { text = "Rename", callback = function()
+        UIManager:close(dialog)
+        askName("Preset name", p.name, function(name) update(function(q) q.name = name end) end)
+    end } })
+    table.insert(buttons, { { text = "Remove", callback = function()
+        UIManager:close(dialog)
+        local ConfirmBox = require("ui/widget/confirmbox")
+        UIManager:show(ConfirmBox:new {
+            text = T("Remove the preset \"%1\"?", p.name),
+            ok_text = "Remove",
+            ok_callback = function()
+                local st = store()
+                table.remove(st.presets, i)
+                save(st)
+                if touchmenu then touchmenu:backToUpperMenu() end
+            end,
+        })
+    end } })
+    dialog = ButtonDialog:new { title = p.name, title_align = "center", buttons = buttons }
+    UIManager:show(dialog)
+end
+
+-- Settings → Light presets: apply, edit, save current, and options
 local function presetsMenu()
     return {
         text = "Light presets",
@@ -409,22 +502,13 @@ local function presetsMenu()
             local items = {}
             for i, p in ipairs(s.presets) do
                 table.insert(items, {
-                    text = has_warmth and T("%1  (%2% · warmth %3%)", p.name, p.brightness, p.warmth)
-                        or T("%1  (%2%)", p.name, p.brightness),
-                    callback = function() applyPreset(p) end,
-                    hold_callback = function(touchmenu)
-                        local ConfirmBox = require("ui/widget/confirmbox")
-                        UIManager:show(ConfirmBox:new {
-                            text = T("Remove the preset \"%1\"?", p.name),
-                            ok_text = "Remove",
-                            ok_callback = function()
-                                local st = store()
-                                table.remove(st.presets, i)
-                                save(st)
-                                if touchmenu then touchmenu:updateItems() end
-                            end,
-                        })
+                    text_func = function()
+                        local q = store().presets[i] or p
+                        return has_warmth and T("%1  (%2% · warmth %3%)", q.name, q.brightness, q.warmth)
+                            or T("%1  (%2%)", q.name, q.brightness)
                     end,
+                    callback = function() applyPreset(store().presets[i] or p) end,
+                    hold_callback = function(touchmenu) editPreset(i, touchmenu) end,
                     separator = i == #s.presets,
                 })
             end
@@ -432,30 +516,16 @@ local function presetsMenu()
                 text = "Save current light as a preset",
                 keep_menu_open = true,
                 callback = function(touchmenu)
-                    local InputDialog = require("ui/widget/inputdialog")
-                    local dialog
-                    dialog = InputDialog:new {
-                        title = "Preset name",
-                        buttons = { {
-                            { text = _("Cancel"), id = "close", callback = function() UIManager:close(dialog) end },
-                            { text = _("Save"), is_enter_default = true, callback = function()
-                                local name = dialog:getInputText()
-                                if name ~= "" then
-                                    local st = store()
-                                    table.insert(st.presets, {
-                                        name = name,
-                                        brightness = math.floor(getBrightness() * 100 + 0.5),
-                                        warmth = math.floor(getWarmth() * 100 + 0.5),
-                                    })
-                                    save(st)
-                                end
-                                UIManager:close(dialog)
-                                if touchmenu then touchmenu:updateItems() end
-                            end },
-                        } },
-                    }
-                    UIManager:show(dialog)
-                    dialog:onShowKeyboard()
+                    askName("Preset name", "", function(name)
+                        local st = store()
+                        table.insert(st.presets, {
+                            name = name,
+                            brightness = math.floor(getBrightness() * 100 + 0.5),
+                            warmth = math.floor(getWarmth() * 100 + 0.5),
+                        })
+                        save(st)
+                        if touchmenu then touchmenu:backToUpperMenu() end
+                    end)
                 end,
             })
             table.insert(items, {
@@ -498,7 +568,7 @@ local function presetsMenu()
                 separator = true,
             })
             table.insert(items, {
-                text_func = function() return "Hold a preset to remove it" end,
+                text_func = function() return "Hold a preset to edit or remove it" end,
                 enabled_func = function() return false end,
             })
             return items
