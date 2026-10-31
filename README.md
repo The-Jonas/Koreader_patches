@@ -40,16 +40,14 @@ that represent folders, and reading information shows up as small badges.
 - **One aspect ratio (2:3)** for books, folder thumbnails and the generated covers of books
   without an image. Very wide covers are centered on a gray background instead of distorted.
 - **Rounded corners** drawn by the patch itself, no extra icon files needed.
-- **Reading badges** you can mix and match, with four presets to start from:
-
-![Badge presets: Classic, Medals, Quest and Rings](docs/cover-grid-presets.png)
+- **Reading badges** you can mix and match, with four presets to start from.
 
 Everything is set in *Project: Title settings → Cover badges*:
 
 | Option | Choices |
 |---|---|
 | Apply a preset | Classic, Medals, Quest, Rings |
-| Progress | badge (with a flame), XP bar, XP bar and badge, ring, hidden |
+| Progress | badge (with a flame), XP bar, XP bar and badge, ring, hidden — see below |
 | Finished / on hold | medal (trophy), award, stamp, ribbon, banner, check, dog-ear, hidden — see below |
 | Badge size | small, medium, large |
 | Icons inside badges | flame, hourglass and book icons on or off |
@@ -58,6 +56,13 @@ Everything is set in *Project: Title settings → Cover badges*:
 | Collection star | star on books that are in a collection |
 | Fade finished covers | lightens the covers of finished books |
 | Idle after | days without opening a book in progress before its progress turns into an hourglass (gray bar or ring); 0 turns it off |
+
+**Progress** on books you are reading. Every option also shows when a book was not opened
+for longer than *Idle after*:
+
+![Progress options](docs/cover-grid-progress.png)
+
+**Finished / on hold** marks:
 
 ![Finished and on hold marks](docs/cover-grid-status.png)
 
