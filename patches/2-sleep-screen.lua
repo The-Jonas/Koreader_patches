@@ -1,50 +1,49 @@
 --[[
-2-sleep-screen.lua — book card sleep screen while reading, random images elsewhere
+2-sleep-screen.lua — book cover and reading progress on the sleep screen
 
 Goal: when the device sleeps in the middle of a book, the sleep screen shows that
-book — cover, chapter and how far along you are — instead of a random picture;
-outside a book, the random pictures keep rotating as before.
+book — a large cover and where you are in the chapter and in the book — instead
+of a random picture; outside a book, the random pictures keep rotating as before.
 
 What it does:
-  - Inside a book: the sleep screen becomes a card with the cover, title, author,
-    current chapter, a progress bar with chapter marks, the time left in the
-    chapter (from Reading statistics) and the current reading streak.
+  - Inside a book: the sleep screen shows the cover and two blocks of details:
+      Chapter  name, progress bar, page in the chapter, percentage, time left
+      Book     title, progress bar with chapter marks, page, percentage, time left
+    plus a line with the reading streak, today's goal and the time it went to sleep.
+  - Three choices with two options each:
+      Details   columns (chapter and book side by side, largest cover) or rows
+      Theme     light or dark
+      Position  details below or above the cover
   - In the file manager: nothing changes, the wallpaper chosen in the sleep screen
     settings is used (for example a random image from a folder).
-  - Three layouts: "card" (cover and details on white), "poster" (cover filling the
-    screen with a details panel over it) and "night" (white on black). The details
-    go below, above or beside the cover.
-  - Books marked "exclude from sleep screen" and books without a cover keep the
-    regular wallpaper.
+  - Books marked "Do not show this book cover on sleep screen" and books without a
+    cover keep the regular wallpaper.
 
 Usage:
   1. Copy this file to koreader/patches/ and restart KOReader.
   2. Settings → Screen → Sleep screen → Wallpaper: pick "Show random image from
-     folder" (or "Show book cover") — the card replaces it only while reading.
-  3. Settings → Screen → Sleep screen → Book card while reading: on/off, layout,
-     where the details go, streak.
+     folder" (or "Show book cover"); the book screen replaces it only while reading.
+  3. Settings → Screen → Sleep screen → Book on sleep screen: on/off, details,
+     theme, position and the streak line.
+  Time left comes from Reading statistics; the streak and goal from
+  2-reading-session.lua (any day with reading counts when that patch has no goal).
 ]]
 
 local CONFIG = {
     defaults = {
         enabled = true,
-        layout = "card",  -- "card", "poster" or "night"
-        details = "below", -- "below", "above" or "beside" the cover
-        streak = true,    -- show the reading streak
+        arrangement = "columns", -- details in "columns" or in rows ("stacked")
+        theme = "light",         -- "light" or "dark"
+        position = "below",      -- details "below" or "above" the cover
+        streak = true,           -- line with streak, goal and time
     },
-    corner_radius = 18,   -- rounded corners of the cover and panels, before DPI scaling
+    corner_radius = 28,          -- rounded corners of the cover, in pixels at 1236 px wide
 }
 
-local LAYOUTS = {
-    { "Card", "card" },
-    { "Poster", "poster" },
-    { "Night", "night" },
-}
-
-local PLACES = {
-    { "Below the cover", "below" },
-    { "Above the cover", "above" },
-    { "Beside the cover", "beside" },
+local CHOICES = {
+    arrangement = { { "Columns", "columns" }, { "Rows", "stacked" } },
+    theme = { { "Light", "light" }, { "Dark", "dark" } },
+    position = { { "Below the cover", "below" }, { "Above the cover", "above" } },
 }
 
 local Blitbuffer = require("ffi/blitbuffer")
@@ -54,30 +53,32 @@ local Geom = require("ui/geometry")
 local ImageWidget = require("ui/widget/imagewidget")
 local Screen = require("device").screen
 local Screensaver = require("ui/screensaver")
-local TextBoxWidget = require("ui/widget/textboxwidget")
+local TextWidget = require("ui/widget/textwidget")
 local Widget = require("ui/widget/widget")
 local logger = require("logger")
 local util = require("util")
 local _ = require("gettext")
 local T = require("ffi/util").template
 
-local BLACK = Blitbuffer.COLOR_BLACK
-local WHITE = Blitbuffer.COLOR_WHITE
-local GRAY = Blitbuffer.COLOR_GRAY_7
-local LIGHT = Blitbuffer.COLOR_GRAY_E
+local THEMES = {
+    light = { bg = Blitbuffer.COLOR_WHITE, fg = Blitbuffer.COLOR_BLACK, border = Blitbuffer.COLOR_BLACK,
+        muted = Blitbuffer.Color8(0x69), track = Blitbuffer.Color8(0xE1) },
+    dark = { bg = Blitbuffer.COLOR_BLACK, fg = Blitbuffer.COLOR_WHITE, border = Blitbuffer.COLOR_WHITE,
+        muted = Blitbuffer.Color8(0x96), track = Blitbuffer.Color8(0x46) },
+}
 
 -- Value of an option chosen in the menu, or its default from CONFIG
 local function opt(key)
-    local saved = G_reader_settings:readSetting("sleep_screen_card") or {}
+    local saved = G_reader_settings:readSetting("sleep_screen_book") or {}
     if saved[key] == nil then return CONFIG.defaults[key] end
     return saved[key]
 end
 
 -- Saves an option chosen in the menu
 local function setOpt(key, value)
-    local saved = G_reader_settings:readSetting("sleep_screen_card") or {}
+    local saved = G_reader_settings:readSetting("sleep_screen_book") or {}
     saved[key] = value
-    G_reader_settings:saveSetting("sleep_screen_card", saved)
+    G_reader_settings:saveSetting("sleep_screen_book", saved)
 end
 
 -- Formats seconds as "1 h 05 min" or "12 min"
@@ -89,11 +90,10 @@ local function formatDuration(secs)
     return string.format("%d min", mins)
 end
 
--- Days in a row with reading, ending today or yesterday; uses the daily goal of
--- 2-reading-session.lua when it is set, any reading otherwise
-local function readingStreak()
+-- Streak of days that met the daily goal, plus today's value and the goal
+local function streakInfo()
     local db = DataStorage:getSettingsDir() .. "/statistics.sqlite3"
-    if not util.fileExists(db) then return 0 end
+    if not util.fileExists(db) then return end
     local ok, days = pcall(function()
         local SQ3 = require("lua-ljsqlite3/init")
         local conn = SQ3.open(db)
@@ -110,265 +110,285 @@ local function readingStreak()
     end)
     if not ok then
         logger.warn("sleep-screen: could not read statistics:", days)
-        return 0
+        return
     end
     local session = G_reader_settings:readSetting("reading_session")
     local goal = session and (session.goal or 30) or 1
     local by_minutes = session and session.goal_type == "minutes"
-    local function met(day)
+    local function value(day)
         local d = days[day]
-        if not d then return false end
-        return (by_minutes and d[2] / 60 or d[1]) >= goal
+        if not d then return 0 end
+        return by_minutes and math.floor(d[2] / 60) or d[1]
     end
     local now = os.time()
-    local k = met(os.date("%Y-%m-%d", now)) and 0 or 1
+    local today = value(os.date("%Y-%m-%d", now))
+    local k = today >= goal and 0 or 1
     local streak = 0
-    while met(os.date("%Y-%m-%d", now - k * 86400)) do
+    while value(os.date("%Y-%m-%d", now - k * 86400)) >= goal do
         streak = streak + 1
         k = k + 1
     end
-    return streak
+    return { streak = streak, today = today, goal = session and goal }
 end
 
--- Everything the card shows about the open book
+-- Everything the screen shows about the open book
 local function collectInfo(ui)
     local props = ui.doc_props or {}
     local page = ui:getCurrentPage()
     local total = ui.document:getPageCount()
     local info = {
         title = props.display_title or "",
-        author = props.authors and props.authors:gsub("\n", ", ") or nil,
+        page = page,
+        pages = total,
         percent = total > 0 and page / total or 0,
         ticks = {},
+        slept_at = os.date("%H:%M"),
     }
+    if ui.pagemap and ui.pagemap:wantsPageLabels() then
+        local __, idx, count = ui.pagemap:getCurrentPageLabel(true)
+        if idx and count then info.page, info.pages = idx, count end
+    end
+    local avg = ui.statistics and ui.statistics.avg_time
+    if not (avg and avg == avg and avg > 0) then avg = nil end
+    if avg then info.book_left = formatDuration(ui.document:getTotalPagesLeft(page) * avg) end
     if ui.toc then
         info.chapter = ui.toc:getTocTitleByPage(page)
         for __, p in ipairs(ui.toc:getTocTicks(1) or {}) do
             if p > 1 and p <= total then table.insert(info.ticks, (p - 1) / total) end
         end
-        local left = ui.toc:getChapterPagesLeft(page, true)
-        local avg = ui.statistics and ui.statistics.avg_time
-        if left and avg and avg == avg and avg > 0 then
-            info.chapter_left = formatDuration((left + 1) * avg)
+        local done = ui.toc:getChapterPagesDone(page)
+        local count = ui.toc:getChapterPageCount(page)
+        if done and count and count > 0 then
+            info.chapter_page, info.chapter_pages = done + 1, count
         end
+        local left = ui.toc:getChapterPagesLeft(page, true)
+        if left and avg then info.chapter_left = formatDuration((left + 1) * avg) end
     end
-    if opt("streak") then info.streak = readingStreak() end
+    if opt("streak") then info.streak = streakInfo() end
     return info
 end
 
--- Paints bg over the parts of a rectangle outside its rounded corners
-local function roundCorners(bb, x, y, w, h, r, bg)
-    for dy = 0, r - 1 do
-        local dist = r - dy - 0.5
-        local span = r - math.floor(math.sqrt(math.max(0, r * r - dist * dist)) + 0.5)
-        if span > 0 then
-            bb:paintRect(x, y + dy, span, 1, bg)
-            bb:paintRect(x + w - span, y + dy, span, 1, bg)
-            bb:paintRect(x, y + h - 1 - dy, span, 1, bg)
-            bb:paintRect(x + w - span, y + h - 1 - dy, span, 1, bg)
-        end
-    end
-end
+---------------------------------------------------------------- drawing
 
--- Progress bar as a pill with white notches where chapters start
-local function paintBar(bb, x, y, w, h, info, fg, track)
-    local r = math.floor(h / 2)
-    bb:paintRoundedRect(x, y, w, h, track, r)
-    local fw = math.floor(w * info.percent)
-    if fw > 0 then bb:paintRoundedRect(x, y, math.max(fw, h), h, fg, r) end
-    if #info.ticks <= 60 then
-        local notch = math.max(1, Screen:scaleBySize(1.5))
-        for __, t in ipairs(info.ticks) do
-            local tx = x + math.floor(w * t)
-            bb:paintRect(tx, y, notch, h, tx < x + fw and track or fg)
-        end
-    end
-end
-
--- Text block of a given width, cut to opts.lines lines; returns the widget and its height
-local function text(str, size, width, opts)
-    opts = opts or {}
-    local args = {
-        text = str,
-        face = Font:getFace(opts.bold and "tfont" or "cfont", size),
-        bold = opts.bold,
-        width = width,
-        alignment = opts.align or "center",
-        fgcolor = opts.fg or BLACK,
-        bgcolor = opts.bg or WHITE,
-    }
-    local tb = TextBoxWidget:new(args)
-    if opts.lines and tb:getSize().h > tb.line_height_px * opts.lines then
-        args.height = tb.line_height_px * opts.lines
-        args.height_adjust = true
-        args.height_overflow_show_ellipsis = true
-        tb:free()
-        tb = TextBoxWidget:new(args)
-    end
-    return tb, tb:getSize().h
-end
-
-local BookCard = Widget:extend {
+local BookScreen = Widget:extend {
     info = nil,
     cover = nil,
-    layout = "card",
     width = 0,
     height = 0,
 }
 
--- The card always fills the screen
-function BookCard:getSize()
+-- Pixels for a size given for a 1236 px wide screen
+function BookScreen:px(v)
+    return math.floor(v * self.k + 0.5)
+end
+
+-- Font face of a given pixel size; style is "regular", "bold" or "italic"
+function BookScreen:face(style, size)
+    local pt = self:px(size) * 1000 / Screen:scaleBySize(1000)
+    if style == "italic" then
+        local ok, f = pcall(Font.getFace, Font, "NotoSans-Italic.ttf", pt)
+        if ok and f then return f end
+    end
+    return Font:getFace(style == "bold" and "tfont" or "cfont", pt)
+end
+
+-- One line of text at (x, y), cut to width w and aligned inside it
+function BookScreen:line(bb, str, x, y, w, size, style, color, align)
+    if not str or str == "" then return end
+    local tw = TextWidget:new {
+        text = str,
+        face = self:face(style, size),
+        bold = style == "bold",
+        fgcolor = color,
+        max_width = w,
+    }
+    local tx = x
+    local sw = tw:getSize().w
+    if align == "center" then tx = x + math.floor((w - sw) / 2)
+    elseif align == "right" then tx = x + w - sw end
+    tw:paintTo(bb, tx, y)
+    tw:free()
+end
+
+-- Rounded progress bar, with notches at the given fractions
+function BookScreen:bar(bb, x, y, w, h, fraction, ticks)
+    local c = self.colors
+    local r = math.floor(h / 2)
+    bb:paintRoundedRect(x, y, w, h, c.track, r)
+    local fw = math.floor(w * math.max(0, math.min(1, fraction)))
+    if fw > 0 then bb:paintRoundedRect(x, y, math.max(fw, h), h, c.fg, r) end
+    if ticks and #ticks <= 60 then
+        local notch = math.max(2, self:px(3))
+        for __, t in ipairs(ticks) do
+            local tx = x + math.floor(w * t)
+            bb:paintRect(tx, y, notch, h, tx < x + fw and c.track or c.bg)
+        end
+    end
+end
+
+-- Texts and fractions of the chapter and book blocks
+function BookScreen:blocks()
+    local i = self.info
+    local pct = function(f) return string.format("%d%%", math.floor(f * 100)) end
+    local chapter = {
+        label = "Chapter",
+        title = i.chapter or "—",
+        fraction = i.chapter_page and i.chapter_page / i.chapter_pages or 0,
+        left = i.chapter_page and T("page %1 of %2", i.chapter_page, i.chapter_pages) or "",
+        right = i.chapter_page and pct(i.chapter_page / i.chapter_pages) or "",
+        note = i.chapter_left and T("%1 left", i.chapter_left) or "",
+    }
+    local book = {
+        label = "Book",
+        title = i.title,
+        fraction = i.percent,
+        ticks = i.ticks,
+        left = T("page %1 of %2", i.page, i.pages),
+        right = pct(i.percent),
+        note = i.book_left and T("%1 left", i.book_left) or "",
+    }
+    return chapter, book
+end
+
+-- Height of the details for the current arrangement
+function BookScreen:detailsHeight()
+    if opt("arrangement") == "stacked" then
+        return self:px((44 + 60 + 30 + 44 + 50) * 2 + 36)
+    end
+    return self:px(40 + 56 + 28 + 42 + 40)
+end
+
+-- Chapter and book side by side, each left-aligned in its column
+function BookScreen:paintColumns(bb, x, y, w)
+    local c = self.colors
+    local gap = self:px(70)
+    local col = math.floor((w - gap) / 2)
+    local chapter, book = self:blocks()
+    for n, b in ipairs({ chapter, book }) do
+        local cx, cy = x + (n - 1) * (col + gap), y
+        self:line(bb, b.label:upper(), cx, cy, col, 24, "bold", c.muted)
+        cy = cy + self:px(40)
+        self:line(bb, b.title, cx, cy, col, 36, "bold", c.fg)
+        cy = cy + self:px(56)
+        self:bar(bb, cx, cy, col, self:px(14), b.fraction, b.ticks)
+        cy = cy + self:px(28)
+        self:line(bb, b.left, cx, cy, col, 27, "regular", c.muted)
+        self:line(bb, b.right, cx, cy, col, 27, "bold", c.fg, "right")
+        cy = cy + self:px(42)
+        self:line(bb, b.note, cx, cy, col, 27, "italic", c.fg)
+    end
+    bb:paintRect(x + col + math.floor(gap / 2), y + self:px(6), self:px(2), self:px(194), c.track)
+end
+
+-- Chapter above book, centered
+function BookScreen:paintStacked(bb, x, y, w)
+    local c = self.colors
+    local chapter, book = self:blocks()
+    for n, b in ipairs({ chapter, book }) do
+        self:line(bb, b.label:upper(), x, y, w, 24, "bold", c.muted, "center")
+        y = y + self:px(44)
+        self:line(bb, b.title, x, y, w, 40, "bold", c.fg, "center")
+        y = y + self:px(60)
+        self:bar(bb, x, y, w, self:px(16), b.fraction, b.ticks)
+        y = y + self:px(30)
+        self:line(bb, b.left, x, y, w, 28, "regular", c.muted)
+        self:line(bb, b.right, x, y, w, 28, "bold", c.fg, "right")
+        y = y + self:px(44)
+        self:line(bb, b.note, x, y, w, 28, "italic", c.fg, "center")
+        y = y + self:px(50)
+        if n == 1 then
+            bb:paintRect(x + self:px(120), y + self:px(4), w - self:px(240), self:px(2), c.track)
+            y = y + self:px(36)
+        end
+    end
+end
+
+-- Streak and goal on the left, time on the right; the rule sits on the side facing the details
+function BookScreen:paintFooter(bb, x, y, w, rule_first)
+    local c = self.colors
+    local s = self.info.streak
+    local left = ""
+    if s then
+        left = T("%1-day streak", s.streak)
+        if s.goal then left = left .. T("  ·  goal %1 / %2", s.today, s.goal) end
+    end
+    local text_y = rule_first and y + self:px(22) or y
+    bb:paintRect(x, rule_first and y or y + self:px(50), w, self:px(2), c.track)
+    self:line(bb, left, x, text_y, w, 26, "regular", c.muted)
+    self:line(bb, T("slept at %1", self.info.slept_at), x, text_y, w, 26, "regular", c.muted, "right")
+end
+
+-- Paints the cover scaled to fit max_w × max_h and centered in that box, with rounded corners
+function BookScreen:paintCover(bb, x, y, max_w, max_h)
+    local c = self.colors
+    local scale = math.min(max_w / self.cover:getWidth(), max_h / self.cover:getHeight())
+    local img = ImageWidget:new { image = self.cover, image_disposable = false, scale_factor = scale }
+    local size = img:getSize()
+    local cx = x + math.floor((max_w - size.w) / 2)
+    local cy = y + math.floor((max_h - size.h) / 2)
+    img:paintTo(bb, cx, cy)
+    img:free()
+    local r = self:px(CONFIG.corner_radius)
+    for dy = 0, r - 1 do
+        local dist = r - dy - 0.5
+        local span = r - math.floor(math.sqrt(math.max(0, r * r - dist * dist)) + 0.5)
+        if span > 0 then
+            bb:paintRect(cx, cy + dy, span, 1, c.bg)
+            bb:paintRect(cx + size.w - span, cy + dy, span, 1, c.bg)
+            bb:paintRect(cx, cy + size.h - 1 - dy, span, 1, c.bg)
+            bb:paintRect(cx + size.w - span, cy + size.h - 1 - dy, span, 1, c.bg)
+        end
+    end
+    bb:paintBorder(cx, cy, size.w, size.h, self:px(2), c.border, r)
+end
+
+-- The screen always covers the whole display
+function BookScreen:getSize()
     return Geom:new { w = self.width, h = self.height }
 end
 
--- Paints the cover scaled to fit max_w × max_h, centered on cx, with rounded corners and a border
-function BookCard:paintCover(bb, cx, top, max_w, max_h, bg, border)
-    local scale = math.min(max_w / self.cover:getWidth(), max_h / self.cover:getHeight())
-    local img = ImageWidget:new {
-        image = self.cover,
-        image_disposable = false,
-        scale_factor = scale,
-    }
-    local size = img:getSize()
-    local x = cx - math.floor(size.w / 2)
-    img:paintTo(bb, x, top)
-    img:free()
-    local r = Screen:scaleBySize(CONFIG.corner_radius)
-    roundCorners(bb, x, top, size.w, size.h, r, bg)
-    bb:paintBorder(x, top, size.w, size.h, Screen:scaleBySize(1), border, r)
-    return size
-end
-
--- Paints title, author, chapter, bar and stats from top, centered in width w; returns the height used
-function BookCard:paintDetails(bb, x, top, w, fg, muted, track, bg)
-    local info = self.info
-    local y = top
-    local gap = Screen:scaleBySize(10)
-    local function put(str, size, opts)
-        if not str or str == "" then return end
-        opts = opts or {}
-        opts.fg, opts.bg = opts.fg or fg, bg
-        local tb, h = text(str, size, w, opts)
-        tb:paintTo(bb, x, y)
-        tb:free()
-        y = y + h + (opts.after or gap)
-    end
-    put(info.title, 30, { bold = true, lines = 2, after = Screen:scaleBySize(4) })
-    put(info.author, 20, { fg = muted, after = gap * 2 })
-    put(info.chapter, 22, { lines = 2 })
-    local bar_h = Screen:scaleBySize(12)
-    paintBar(bb, x, y, w, bar_h, info, fg, track)
-    y = y + bar_h + gap
-    local stats = { string.format("%d%%", math.floor(info.percent * 100)) }
-    if info.chapter_left then table.insert(stats, T("%1 left in chapter", info.chapter_left)) end
-    if info.streak and info.streak > 0 then
-        table.insert(stats, T("%1-day streak", info.streak))
-    end
-    local narrow = w < Screen:scaleBySize(380)
-    put(table.concat(stats, narrow and "\n" or "  ·  "), 19, { fg = muted, after = 0 })
-    return y - top
-end
-
--- Size of the cover once scaled to fit max_w × max_h
-function BookCard:coverSize(max_w, max_h)
-    local scale = math.min(max_w / self.cover:getWidth(), max_h / self.cover:getHeight())
-    return math.floor(self.cover:getWidth() * scale), math.floor(self.cover:getHeight() * scale)
-end
-
--- Renders the details off-screen at width w; returns the buffer and the height used
-function BookCard:renderDetails(w, colors, bb_type)
-    local scratch = Blitbuffer.new(w, self.height, bb_type)
-    scratch:fill(colors.bg)
-    local used = self:paintDetails(scratch, 0, 0, w, colors.fg, colors.muted, colors.track, colors.bg)
-    return scratch, used
-end
-
--- Cover and details on a plain background, with the details below, above or beside the cover
-function BookCard:paintPlainLayout(bb, x, y, colors)
-    local w, h = self.width, self.height
-    local m = Screen:scaleBySize(36)
-    local place = opt("details")
-    bb:paintRect(x, y, w, h, colors.bg)
-    if place == "beside" then
-        local col_w = math.floor((w - 3 * m) / 2)
-        local cw, ch = self:coverSize(col_w, h - 4 * m)
-        self:paintCover(bb, x + m + math.floor(col_w / 2), y + math.floor((h - ch) / 2), col_w, h - 4 * m,
-            colors.bg, colors.border)
-        local text_w = w - 3 * m - col_w
-        local scratch, used = self:renderDetails(text_w, colors, bb:getType())
-        bb:blitFrom(scratch, x + 2 * m + col_w, y + math.floor((h - used) / 2), 0, 0, text_w, used)
-        scratch:free()
-        return
-    end
-    local scratch, used = self:renderDetails(w - 2 * m, colors, bb:getType())
-    local cover_max_h = h - used - 6 * m
-    local cw, ch = self:coverSize(w - 4 * m, math.min(cover_max_h, math.floor(h * 0.6)))
-    local block = ch + 2 * m + used
-    local top = y + math.floor((h - block) / 2)
-    if place == "above" then
-        bb:blitFrom(scratch, x + m, top, 0, 0, w - 2 * m, used)
-        self:paintCover(bb, x + math.floor(w / 2), top + used + 2 * m, w - 4 * m, ch, colors.bg, colors.border)
-    else
-        self:paintCover(bb, x + math.floor(w / 2), top, w - 4 * m, ch, colors.bg, colors.border)
-        bb:blitFrom(scratch, x + m, top + ch + 2 * m, 0, 0, w - 2 * m, used)
-    end
-    scratch:free()
-end
-
--- Cover filling the screen, details on a white panel at the bottom, top or right side
-function BookCard:paintPosterLayout(bb, x, y)
-    local w, h = self.width, self.height
-    local m = Screen:scaleBySize(28)
-    local pad = Screen:scaleBySize(24)
-    local back = Blitbuffer.COLOR_GRAY_3
-    bb:paintRect(x, y, w, h, back)
-    self:paintCover(bb, x + math.floor(w / 2), y, w, h, back, back)
-    local place = opt("details")
-    local panel_w = place == "beside" and math.floor(w * 0.46) or w - 2 * m
-    local inner_w = panel_w - 2 * pad
-    local colors = { fg = BLACK, muted = GRAY, track = LIGHT, bg = WHITE }
-    local scratch, used = self:renderDetails(inner_w, colors, bb:getType())
-    local panel_h = used + 2 * pad
-    local px, py = x + m, y + h - m - panel_h
-    if place == "above" then
-        py = y + m
-    elseif place == "beside" then
-        px, py = x + w - m - panel_w, y + math.floor((h - panel_h) / 2)
-    end
-    local r = Screen:scaleBySize(CONFIG.corner_radius)
-    bb:paintRoundedRect(px, py, panel_w, panel_h, WHITE, r)
-    bb:blitFrom(scratch, px + pad, py + pad, 0, 0, inner_w, used)
-    bb:paintBorder(px, py, panel_w, panel_h, Screen:scaleBySize(1), BLACK, r)
-    scratch:free()
-end
-
--- Draws the chosen layout
-function BookCard:paintTo(bb, x, y)
+-- Lays out cover, details and footer for the chosen options
+function BookScreen:paintTo(bb, x, y)
     self.dimen = Geom:new { x = x, y = y, w = self.width, h = self.height }
-    if self.layout == "poster" then
-        self:paintPosterLayout(bb, x, y)
-    elseif self.layout == "night" then
-        self:paintPlainLayout(bb, x, y, { fg = WHITE, muted = Blitbuffer.COLOR_GRAY_B,
-            track = Blitbuffer.COLOR_GRAY_4, bg = BLACK, border = WHITE })
+    self.k = self.width / 1236
+    self.colors = THEMES[opt("theme")] or THEMES.light
+    local w, h = self.width, self.height
+    bb:paintRect(x, y, w, h, self.colors.bg)
+    local m = self:px(opt("arrangement") == "stacked" and 90 or 80)
+    local edge, gap = self:px(60), self:px(50)
+    local footer = opt("streak")
+    local footer_h = footer and self:px(80) or 0
+    local details_h = self:detailsHeight()
+    local cover_h = h - 2 * edge - details_h - gap - footer_h
+    local paint = opt("arrangement") == "stacked" and self.paintStacked or self.paintColumns
+    if opt("position") == "above" then
+        if footer then self:paintFooter(bb, x + m, y + edge - self:px(16), w - 2 * m, false) end
+        local dy = y + edge + footer_h
+        paint(self, bb, x + m, dy, w - 2 * m)
+        self:paintCover(bb, x + m, dy + details_h + gap, w - 2 * m, cover_h)
     else
-        self:paintPlainLayout(bb, x, y, { fg = BLACK, muted = GRAY, track = LIGHT, bg = WHITE, border = BLACK })
+        self:paintCover(bb, x + m, y + edge, w - 2 * m, cover_h)
+        paint(self, bb, x + m, y + edge + cover_h + gap, w - 2 * m)
+        if footer then self:paintFooter(bb, x + m, y + h - edge - self:px(28), w - 2 * m, true) end
     end
 end
 
 -- Frees the cover image
-function BookCard:free()
+function BookScreen:free()
     if self.cover then
         self.cover:free()
         self.cover = nil
     end
 end
-BookCard.onCloseWidget = BookCard.free
+BookScreen.onCloseWidget = BookScreen.free
 
--- Swaps the wallpaper for the book card when sleeping inside a book
+---------------------------------------------------------------- sleep screen hooks
+
+-- Swaps the wallpaper for the book screen when sleeping inside a book
 local orig_setup = Screensaver.setup
 Screensaver.setup = function(self, event, event_message)
     orig_setup(self, event, event_message)
-    self._book_card = nil
+    self._book_info = nil
     local ui = self.ui
     if not (opt("enabled") and ui and ui.document) then return end
     if not (self.screensaver_type == "random_image" or self.screensaver_type == "cover") then return end
@@ -382,91 +402,74 @@ Screensaver.setup = function(self, event, event_message)
     if self.image then self.image:free() end
     self.image, self.image_file = cover, nil
     self.screensaver_type = "cover"
-    self._book_card = info
+    self._book_info = info
 end
 
--- Builds the book card where the wallpaper image would be built
+-- Builds the book screen where the wallpaper image would be built
 local orig_show = Screensaver.show
 Screensaver.show = function(self)
-    if not self._book_card then return orig_show(self) end
-    local info = self._book_card
+    if not self._book_info then return orig_show(self) end
+    local info = self._book_info
     local orig_new = ImageWidget.new
     ImageWidget.new = function(cls, settings)
         ImageWidget.new = orig_new
         if cls ~= ImageWidget then return orig_new(cls, settings) end
-        local card = BookCard:new {
-            info = info,
-            cover = settings.image,
-            layout = opt("layout"),
-            width = settings.width,
-            height = settings.height,
-        }
         self.image = nil
-        return card
+        return BookScreen:new { info = info, cover = settings.image, width = settings.width, height = settings.height }
     end
     local ok, err = pcall(orig_show, self)
     ImageWidget.new = orig_new
     if not ok then logger.warn("sleep-screen:", err) end
 end
 
--- Forgets the card when the sleep screen closes
+-- Forgets the book when the sleep screen closes
 local orig_cleanup = Screensaver.cleanup
 Screensaver.cleanup = function(self, ...)
-    self._book_card = nil
+    self._book_info = nil
     return orig_cleanup(self, ...)
 end
 
--- Submenu "Book card while reading"
-local function cardMenu()
-    local layout_items = {}
-    for __, l in ipairs(LAYOUTS) do
-        table.insert(layout_items, {
-            text = l[1],
+---------------------------------------------------------------- menu
+
+-- Entry showing the current choice of an option, opening its radio list
+local function choiceMenu(title, key)
+    local items = {}
+    for __, choice in ipairs(CHOICES[key]) do
+        table.insert(items, {
+            text = choice[1],
             radio = true,
-            checked_func = function() return opt("layout") == l[2] end,
-            callback = function() setOpt("layout", l[2]) end,
-        })
-    end
-    local place_items = {}
-    for __, d in ipairs(PLACES) do
-        table.insert(place_items, {
-            text = d[1],
-            radio = true,
-            checked_func = function() return opt("details") == d[2] end,
-            callback = function() setOpt("details", d[2]) end,
+            checked_func = function() return opt(key) == choice[2] end,
+            callback = function() setOpt(key, choice[2]) end,
         })
     end
     return {
-        text = "Book card while reading",
+        text_func = function()
+            for __, choice in ipairs(CHOICES[key]) do
+                if choice[2] == opt(key) then return T("%1: %2", title, choice[1]) end
+            end
+            return title
+        end,
+        enabled_func = function() return opt("enabled") end,
+        sub_item_table = items,
+    }
+end
+
+-- Submenu "Book on sleep screen"
+local function bookMenu()
+    return {
+        text = "Book on sleep screen",
         sub_item_table = {
             {
-                text = "Show the book card when sleeping in a book",
+                text = "Show the book when sleeping in it",
                 checked_func = function() return opt("enabled") end,
                 callback = function() setOpt("enabled", not opt("enabled")) end,
                 separator = true,
             },
+            choiceMenu("Details", "arrangement"),
+            choiceMenu("Theme", "theme"),
+            choiceMenu("Position", "position"),
             {
-                text_func = function()
-                    for __, l in ipairs(LAYOUTS) do
-                        if l[2] == opt("layout") then return T("Layout: %1", l[1]) end
-                    end
-                    return "Layout"
-                end,
-                enabled_func = function() return opt("enabled") end,
-                sub_item_table = layout_items,
-            },
-            {
-                text_func = function()
-                    for __, d in ipairs(PLACES) do
-                        if d[2] == opt("details") then return T("Details: %1", d[1]) end
-                    end
-                    return "Details"
-                end,
-                enabled_func = function() return opt("enabled") end,
-                sub_item_table = place_items,
-            },
-            {
-                text = "Show reading streak",
+                text = "Show streak, goal and time",
                 enabled_func = function() return opt("enabled") end,
                 checked_func = function() return opt("streak") end,
                 callback = function() setOpt("streak", not opt("streak")) end,
@@ -493,7 +496,7 @@ for __, path in ipairs({ "apps/reader/modules/readermenu", "apps/filemanager/fil
         for __, tab in ipairs(self.tab_item_table or {}) do
             local item = findItem(tab, _("Sleep screen"))
             if item and item.sub_item_table then
-                table.insert(item.sub_item_table, 2, cardMenu())
+                table.insert(item.sub_item_table, 2, bookMenu())
                 break
             end
         end

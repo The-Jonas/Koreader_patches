@@ -27,7 +27,7 @@ Patches with options have a configuration table right below that block.
 | [`2-progress-bar.lua`](#2-progress-barlua) | Progress bar styles for the status bar while reading |
 | [`2-reading-session.lua`](#2-reading-sessionlua) | Session summary, daily goal with streak, and a recap when coming back to a book |
 | [`2-vocabulary-highlights.lua`](#2-vocabulary-highlightslua) | Highlights of the vocabulary color go to the Vocabulary builder |
-| [`2-sleep-screen.lua`](#2-sleep-screenlua) | Book card on the sleep screen while reading, random images elsewhere |
+| [`2-sleep-screen.lua`](#2-sleep-screenlua) | Book cover and progress on the sleep screen while reading |
 | [`2-reading-stats.lua`](#2-reading-statslua) | One screen with book, week and year statistics |
 | [`2-status-bar.lua`](#2-status-barlua) | Time left in words and tidier compact items in the status bar |
 | [`2--fonts.lua`](#2--fontslua) | Interface font picker and steady Project: Title font sizes |
@@ -199,23 +199,32 @@ which is enabled by default.
 
 ### `2-sleep-screen.lua`
 
-When the device sleeps in the middle of a book, the sleep screen shows that book: cover, title,
-author, current chapter, a progress bar with chapter marks, the time left in the chapter and
-the reading streak. In the file manager nothing changes — the wallpaper set in the sleep screen
-settings is used, for example a random image from a folder.
+When the device sleeps in the middle of a book, the sleep screen shows that book: a large cover
+and where you are in the chapter and in the book. In the file manager nothing changes — the
+wallpaper set in the sleep screen settings is used, for example a random image from a folder.
 
-![Sleep screen layouts and detail positions](docs/sleep-screen-layouts.png)
+![Sleep screen options](docs/sleep-screen-layouts.png)
 
-Options in *Settings → Screen → Sleep screen → Book card while reading*: turn it on or off,
-choose the layout (*Card*, *Poster* or *Night*), put the details below, above or beside the
-cover, and show or hide the streak.
+- **Chapter:** name, progress bar, page in the chapter, percentage and time left.
+- **Book:** title, progress bar with chapter marks, page, percentage and time left. Page numbers
+  follow *stable page numbers* when they are on, so they match `2-physical-pages.lua`.
+- **Last line:** reading streak, today's goal and the time the device went to sleep.
 
-- The card replaces the *random image* and *book cover* wallpapers only while reading; the
-  other wallpaper types are left alone.
-- Books marked *Do not show this book cover on sleep screen* and books without a cover keep
-  the regular wallpaper.
-- The time left in the chapter comes from *Reading statistics*. The streak uses the daily goal
-  of `2-reading-session.lua` when it is set, and any day with reading otherwise.
+Options in *Settings → Screen → Sleep screen → Book on sleep screen* — three choices with two
+options each, plus the last line on or off:
+
+| Choice | Options |
+|---|---|
+| Details | *Columns* (chapter and book side by side, largest cover) or *Rows* |
+| Theme | *Light* or *Dark* |
+| Position | details *below* or *above* the cover |
+
+- It replaces the *random image* and *book cover* wallpapers only while reading; the other
+  wallpaper types are left alone.
+- Books marked *Do not show this book cover on sleep screen* and books without a cover keep the
+  regular wallpaper.
+- Time left comes from *Reading statistics*. The streak uses the daily goal of
+  `2-reading-session.lua` when it is set, and any day with reading otherwise.
 
 ---
 
