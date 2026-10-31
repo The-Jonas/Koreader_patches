@@ -10,10 +10,16 @@ What it does:
     rounded   rounded bar with a small gap between chapters
     segments  one block per chapter, like quest stages: chapters already read
               are filled, the current one fills up as you read
+    thin      thin line with a tick at every chapter: notches in the part already
+              read, gray ticks ahead and a bold tick where the current chapter ends
     dual      thin line marking the stretch read in this session (from the page
               where the book was opened to the current one) over a thicker bar
               for the whole book
   Chapters come from the first level of the book's table of contents.
+  Books with many chapters get a simpler look so the bar stays readable:
+  "segments" turns into "rounded" above max_segments chapters, and both turn
+  into a plain bar without chapter marks above max_chapter_marks ("thin" drops
+  its ticks at the same point).
 
 Usage:
   1. Copy this file to koreader/patches/ and restart KOReader.
@@ -21,19 +27,26 @@ Usage:
      "KOReader default" keeps the original bar.
   3. The bar height is set in Status bar → Progress bar → Thickness, height & colors
      (a taller bar suits "dual").
+  The "initial position marker" option of the progress bar becomes a small triangle
+  just above the line, where this session started, so it stays visible over the filled
+  part. "dual" leaves it out, since its top line already shows the session.
   The styles draw the whole bar themselves, so they replace other patches that
   also change how the status bar progress bar is drawn while a style is active.
 ]]
 
 local CONFIG = {
-    default_style = "segments", -- "default", "rounded", "segments" or "dual"
+    default_style = "segments", -- "default", "rounded", "segments", "thin" or "dual"
     chapter_gap = 3,            -- space between chapters, before DPI scaling
+    max_segments = 25,          -- above this many chapters, "segments" is drawn as "rounded"
+    max_chapter_marks = 60,     -- above this many chapters, chapter gaps are left out
+    marker_size = 4,            -- height of the session start triangle, before DPI scaling
 }
 
 local STYLES = {
     { "KOReader default", "default" },
     { "Rounded", "rounded" },
     { "Segments", "segments" },
+    { "Thin with chapter ticks", "thin" },
     { "Dual (session and book)", "dual" },
 }
 
@@ -78,26 +91,35 @@ local function paintPill(bb, x, y, w, h, fill, color)
     bb:paintBorder(x, y, w, h, 1, BLACK, r)
 end
 
--- "rounded": one pill for the whole book with white gaps where chapters start
-local function paintRounded(bb, x, y, w, h, footer, page)
+-- Each painter returns the top of the line it drew, where the session triangle points to
+
+-- "rounded": one pill for the whole book with white gaps where chapters start (no gaps when there are too many)
+local function paintRounded(bb, x, y, w, h, footer, page, starts)
+    starts = starts or chapterStarts(footer)
     paintPill(bb, x, y, w, h, page / footer.pages)
+    if #starts > CONFIG.max_chapter_marks then return y end
     local gap = math.max(1, math.floor(Screen:scaleBySize(CONFIG.chapter_gap) / 2))
-    for i, s in ipairs(chapterStarts(footer)) do
+    for i, s in ipairs(starts) do
         if i > 1 then
             local gx = x + math.floor(w * (s - 1) / footer.pages)
             bb:paintRect(gx, y, gap, h, WHITE)
         end
     end
+    return y
 end
 
--- "segments": one block per chapter, filled for read chapters and partially for the current one
+-- "segments": one block per chapter, filled for read chapters and partially for the current one (or "rounded" when there are too many)
 local function paintSegments(bb, x, y, w, h, footer, page)
     local starts = chapterStarts(footer)
+    if #starts > CONFIG.max_segments then
+        return paintRounded(bb, x, y, w, h, footer, page, starts)
+    end
     local gap = Screen:scaleBySize(CONFIG.chapter_gap)
     local total = footer.pages
     local usable = w - gap * (#starts - 1)
     if usable < #starts * 2 then
-        return paintPill(bb, x, y, w, h, page / total)
+        paintPill(bb, x, y, w, h, page / total)
+        return y
     end
     local r = math.min(math.floor(h / 2), Screen:scaleBySize(3))
     local cx = x
@@ -117,6 +139,35 @@ local function paintSegments(bb, x, y, w, h, footer, page)
         end
         cx = cx + sw + gap
     end
+    return y
+end
+
+-- "thin": centered thin line with full-height chapter ticks; the end of the current chapter is bold
+local function paintThin(bb, x, y, w, h, footer, page, starts)
+    starts = starts or chapterStarts(footer)
+    local total = footer.pages
+    local line_h = math.max(2, math.floor(h / 3))
+    local ly = y + math.floor((h - line_h) / 2)
+    local filled = math.floor(w * page / total)
+    bb:paintRect(x, ly, w, line_h, TRACK)
+    bb:paintRect(x, ly, filled, line_h, BLACK)
+    if #starts > CONFIG.max_chapter_marks then return ly end
+    local tick = math.max(1, math.floor(Screen:scaleBySize(CONFIG.chapter_gap) / 2))
+    local next_done = false
+    for i, s in ipairs(starts) do
+        if i > 1 then
+            local tx = x + math.floor(w * (s - 1) / total)
+            if tx < x + filled then
+                bb:paintRect(tx, ly, tick, line_h, WHITE)
+            elseif not next_done then
+                bb:paintRect(tx - tick, y, tick * 3, h, BLACK)
+                next_done = true
+            else
+                bb:paintRect(tx, y + math.floor(h / 6), tick, h - 2 * math.floor(h / 6), Blitbuffer.COLOR_GRAY_9)
+            end
+        end
+    end
+    return ly
 end
 
 -- "dual": thin line with the stretch read in this session over a thicker pill for the whole book
@@ -132,9 +183,19 @@ local function paintDual(bb, x, y, w, h, footer, page)
     paintPill(bb, x, y + line_h + gap, w, h - line_h - gap, page / total)
 end
 
+-- Triangle pointing down with its tip at (cx, tip_y), marking where this session started
+local function paintSessionMarker(bb, cx, tip_y)
+    local th = Screen:scaleBySize(CONFIG.marker_size)
+    for row = 0, th - 1 do
+        local half = math.floor((th - row) * 0.8)
+        bb:paintRect(cx - half, tip_y - th + row, 2 * half + 1, 1, BLACK)
+    end
+end
+
 local PAINTERS = {
     rounded = paintRounded,
     segments = paintSegments,
+    thin = paintThin,
     dual = paintDual,
 }
 
@@ -150,7 +211,12 @@ local function paintStyled(bar, footer, bb, x, y)
     bar.dimen = Geom:new { x = x, y = y, w = size.w, h = size.h }
     if size.w == 0 or size.h == 0 then return end
     bb:paintRect(x, y, size.w, size.h, WHITE)
-    painter(bb, x, y, size.w, size.h, footer, math.min(footer.pageno, footer.pages))
+    local page = math.min(footer.pageno, footer.pages)
+    local line_top = painter(bb, x, y, size.w, size.h, footer, page)
+    if line_top and bar.initial_pos_marker then
+        local start = math.min(footer._session_start_page, page)
+        paintSessionMarker(bb, x + math.floor(size.w * (start - 1) / footer.pages), line_top)
+    end
 end
 
 -- Gives the status bar progress bar its own paintTo, so other patches that replace

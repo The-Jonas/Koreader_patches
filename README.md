@@ -132,12 +132,22 @@ New looks for the status bar progress bar while reading, chosen in
 - **Rounded:** one rounded bar with a small gap where each chapter starts.
 - **Segments:** one block per chapter, like quest stages — chapters already read are filled
   and the current one fills up as you read.
+- **Thin with chapter ticks:** a thin line with a mark at every chapter — notches in the part
+  already read, gray ticks ahead, and a bold tick where the current chapter ends.
 - **Dual (session and book):** the thin line marks the stretch read in this session, from the
   page where you opened the book to the current one; the bar below shows the whole book.
 - **KOReader default** keeps the original bar.
 
-Chapters come from the first level of the table of contents. A taller bar (*Thickness, height
-& colors*) suits the dual style.
+Chapters come from the first level of the table of contents. Books with many chapters get a
+simpler look so the bar stays readable: *Segments* is drawn as *Rounded* above 25 chapters, and
+above 60 chapters the chapter gaps and ticks are left out (both limits are in the `CONFIG` table). A taller
+bar (*Thickness, height & colors*) suits the dual style.
+
+KOReader's *Show initial position marker* option becomes a small triangle just above the bar,
+pointing at the page where the session started, so it stays visible over the filled part. *Dual*
+leaves it out, since its top line already shows the session.
+
+![Progress bar on books with many chapters](docs/progress-bar-long.png)
 
 ---
 
