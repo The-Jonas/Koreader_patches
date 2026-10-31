@@ -28,6 +28,8 @@ Patches with options have a configuration table right below that block.
 | [`2-reading-session.lua`](#2-reading-sessionlua) | Session summary, daily goal with streak, and a recap when coming back to a book |
 | [`2-vocabulary-highlights.lua`](#2-vocabulary-highlightslua) | Highlights of the vocabulary color go to the Vocabulary builder |
 | [`2-sleep-screen.lua`](#2-sleep-screenlua) | Book card on the sleep screen while reading, random images elsewhere |
+| [`2-status-bar.lua`](#2-status-barlua) | Time left in words and tidier compact items in the status bar |
+| [`2--fonts.lua`](#2--fontslua) | Interface font picker and steady Project: Title font sizes |
 
 ---
 
@@ -216,6 +218,35 @@ cover, and show or hide the streak.
 
 ---
 
+### `2-status-bar.lua`
+
+Small changes that make the reading status bar easier to read:
+
+![Status bar before and after](docs/status-bar.png)
+
+- **Time left in words:** "1 h 37 min left in book" and "9 min left in chapter" instead of
+  "01:37" and "00:09" (needs *Reading statistics*).
+- **Compact items:** the regular frontlight icons, which are clearer than the compact ones,
+  and the battery percentage next to its icon.
+- **Compact items with no separator:** a small arrow before the title, chapter and author, so
+  they don't run into the numbers around them.
+
+Each part can be turned off in the `CONFIG` table.
+
+---
+
+### `2--fonts.lua`
+
+- **UI font:** *Settings → UI font* lists the fonts installed for books, each shown in its own
+  typeface. The choice replaces Noto Sans in menus and dialogs after a restart.
+- **Project: Title sizes:** sets the font size limits of the library. By default Project: Title
+  uses the largest size that fits each title, so titles end up in different sizes; the values
+  in `PT_SIZES` keep one size for all of them.
+
+The name starts with `2--` so it runs before the other patches create any text.
+
+---
+
 ## Development
 
 The [`dev/`](dev) folder holds what is used to test the patches in a KOReader emulator
@@ -237,6 +268,12 @@ These patches were rewritten from community ideas:
   Starting point for `2-physical-pages.lua`.
 - **Kaya** — Statistics plugin fork with `applyPerfectSync`, which matched page numbers to a
   physical page count. `2-physical-pages.lua` reads the values it saved.
+- **sebdelsol** — [KOReader.patches](https://github.com/sebdelsol/KOReader.patches): UI font
+  menu, better compact status bar items and thin progress bar with chapter marks. Basis for
+  `2--fonts.lua`, `2-status-bar.lua` and the *Thin* style of `2-progress-bar.lua`.
+- **quanganhdo** — [koreader-user-patches](https://github.com/quanganhdo/koreader-user-patches):
+  time left in words. Basis for `2-status-bar.lua`.
+- **Andreas Lösel** — Project: Title font size patch. Basis for `2--fonts.lua`.
 - **omer-faruq** — dual-state sleep screen patch: a different sleep screen inside a book and in
   the file manager. Idea behind `2-sleep-screen.lua`.
 - A highlight color theme shared on Reddit and a highlight filter patch, both by unknown
