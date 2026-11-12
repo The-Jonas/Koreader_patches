@@ -14,6 +14,7 @@
       marker            marca-texto grosso embaixo (cinza)
       box               caixa (com folga nas laterais)
       rounded_box       caixa com cantos arredondados (com folga nas laterais)
+      dashed_box        caixa tracejada (com folga nas laterais)
       brackets          colchetes [ ] só no início e no fim do trecho
       quotes            aspas “ ” cinza, grandes, afastadas do texto (não confunde com as do livro)
       bold              negrito (falso, engrossa o texto já desenhado)
@@ -25,6 +26,9 @@
     Também:
       invert            inverte o trecho e mantém uma faixa da cor embaixo
       cores escuras     no clareado (e combinações), texto branco sobre a cor
+      lighten_underline/lighten_rounded: o traço usa preto ou branco (o que
+                        contrastar com o fundo), nunca a própria cor do destaque —
+                        senão o traço cai em cima de um fundo da mesma cor e some
 ]]
 
 local Blitbuffer = require("ffi/blitbuffer")
@@ -222,6 +226,31 @@ add("rounded_box", "Rounded box", function(bb, x, y, w, h, c)
     roundedBox(bb, x, y, w, h, c)
 end)
 
+-- caixa tracejada
+add("dashed_box", "Dashed box", function(bb, x, y, w, h, c)
+    local p = pad()
+    local bx, bw = x - p, w + 2 * p
+    local th, dash, gap = sc(1), sc(6), sc(4)
+    local function hline(yy)
+        local i = 0
+        while i < bw do
+            bb:paintRect(bx + i, yy, math.min(dash, bw - i), th, c)
+            i = i + dash + gap
+        end
+    end
+    local function vline(xx)
+        local i = 0
+        while i < h do
+            bb:paintRect(xx, y + i, th, math.min(dash, h - i), c)
+            i = i + dash + gap
+        end
+    end
+    hline(y)
+    hline(y + h - th)
+    vline(bx)
+    vline(bx + bw - th)
+end)
+
 -- colchetes (só no início e no fim do trecho marcado)
 local function bracketClose(p)
     local t, serif = sc(1), sc(4)
@@ -338,15 +367,22 @@ add("bold_italic", "Bold + italic", function(bb, x, y, w, h)
     fauxBold(bb, x, y, w, h)
 end)
 
--- combinações com clareado
+-- combinações com clareado: o traço precisa contrastar com o próprio fundo que o
+-- clareado acabou de pintar (que é tingido na cor do destaque, ou vira a própria cor
+-- nas escuras), senão o traço na mesma cor do fundo fica invisível. Por isso usamos
+-- branco nas escuras (mesma convenção do texto branco) e preto nas claras.
+local function strokeOnLighten(ctx)
+    return useDarkLighten(ctx.bb, ctx.color) and WHITE or BLACK
+end
+
 add("lighten_underline", "Lighten + underline", function(bb, x, y, w, h, c, ctx)
     lightenOrig(ctx)
-    underline(bb, x, y, w, h, c)
+    underline(bb, x, y, w, h, strokeOnLighten(ctx))
 end)
 
 add("lighten_rounded", "Lighten + rounded box", function(bb, x, y, w, h, c, ctx)
     lightenOrig(ctx)
-    roundedBox(bb, x, y, w, h, c)
+    roundedBox(bb, x, y, w, h, strokeOnLighten(ctx))
 end)
 
 ------------------------------------------------------------------------

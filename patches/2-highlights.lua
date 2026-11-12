@@ -77,6 +77,7 @@ local CONFIG = {
         { key = "marker",            name = "Marker underline" },
         { key = "double_underline",  name = "Double underline" },
         { key = "rounded_box",       name = "Rounded box" },
+        { key = "dashed_box",        name = "Dashed box" },
         { key = "bold_italic",       name = "Bold + italic" },
         { key = "lighten_underline", name = "Lighten + underline" },
         { key = "lighten_rounded",   name = "Lighten + rounded box" },
