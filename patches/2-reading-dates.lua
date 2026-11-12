@@ -58,19 +58,26 @@ ReaderUI.init = function(self, ...)
     end
 end
 
--- Wraps DocSettings:flush to keep finished_on in sync with the status when metadata is written
+-- Wraps DocSettings:flush to keep finished_on in sync with the status when metadata is written.
+-- Our own bookkeeping runs inside pcall: if it ever breaks, the real flush below still happens,
+-- so a bug here can never cost a page position or a highlight.
 local orig_flush = DocSettings.flush
 DocSettings.flush = function(self, data, ...)
-    local d = data or self.data
-    local summary = d and d.summary
-    if type(summary) == "table" then
-        if summary.status == "complete" then
-            if not summary.finished_on then
-                summary.finished_on = summary.modified or today()
+    local ok, err = pcall(function()
+        local d = data or self.data
+        local summary = d and d.summary
+        if type(summary) == "table" then
+            if summary.status == "complete" then
+                if not summary.finished_on then
+                    summary.finished_on = summary.modified or today()
+                end
+            elseif summary.finished_on then
+                summary.finished_on = nil
             end
-        elseif summary.finished_on then
-            summary.finished_on = nil
         end
+    end)
+    if not ok then
+        logger.warn("reading-dates: finished_on bookkeeping failed, saving anyway:", err)
     end
     return orig_flush(self, data, ...)
 end
