@@ -6,8 +6,8 @@ later with KOReader's Vocabulary builder (flashcards with spaced repetition),
 without opening the dictionary for every word.
 
 What it does:
-  - When a highlight gets the vocabulary color (gray, the "✎ Vocabulary"
-    category of 2-highlights.lua), the highlighted word or short expression is
+  - When a highlight gets the vocabulary color (gray, reserved for vocabulary
+    by 2-highlights.lua), the highlighted word or short expression is
     added to the Vocabulary builder, with the book title and the sentence around
     it as context — the same way a dictionary lookup adds it.
   - Works both when the highlight is created with that color and when an

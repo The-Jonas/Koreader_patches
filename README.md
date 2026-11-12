@@ -22,7 +22,8 @@ Patches with options have a configuration table right below that block.
 |---|---|
 | [`2-cover-grid.lua`](#2-cover-gridlua) | Uniform covers and reading badges in the Project: Title grid |
 | [`2-physical-pages.lua`](#2-physical-pageslua) | Page numbers that match the printed edition |
-| [`2-highlights.lua`](#2-highlightslua) | Highlight categories readable in grayscale, plus filter shortcuts |
+| [`2-highlights.lua`](#2-highlightslua) | Highlight meanings by style, colors on distinct grays, grid pickers and filter shortcuts |
+| [`2-highlight-styles.lua`](#2-highlight-styleslua) | Extra highlight styles: wavy, box, brackets, quotes, faux bold and italic and more |
 | [`2-reading-dates.lua`](#2-reading-dateslua) | Start and finish date of every book |
 | [`2-progress-bar.lua`](#2-progress-barlua) | Progress bar styles for the status bar while reading |
 | [`2-reading-session.lua`](#2-reading-sessionlua) | Session summary, daily goal with streak, and a recap when coming back to a book |
@@ -101,17 +102,45 @@ manually.
 
 ### `2-highlights.lua`
 
-Turns the highlight colors into reading categories and makes sure each one lands on a
-different gray level on a grayscale e-ink screen (16 levels). Each color keeps its hue, so it
-stays recognizable on color screens and in exports.
+Gives each highlight a meaning through its **style** and keeps the **colors** as plain colors
+that stay distinguishable on a grayscale e-ink screen.
 
-![Highlight categories in color and in grayscale](docs/highlights.png)
+![Color and style pickers](docs/highlights.png)
 
-It also adds three gesture actions (*Settings → Taps and gestures → Gesture manager*): filter
-highlights by category, by style, or by both. Each one opens the highlight list with the
-filter picker already shown.
+- **Meaning by style:** Box means *Important*, Wavy *Confusing*, Quotes *Smart Quote*, Dashed
+  *Reference*, Dotted *WorldBuilding*, Brackets *Entities*, Italic *Emotional* and Bold
+  *Disturbing*. Style buttons read “Important · Box”, and the styles with a meaning come first.
+- **Colors on distinct grays:** eleven colors, each tuned to land on its own gray level of a
+  16-level e-ink screen, from Black (level 0) to Yellow (level 14). The hue is kept, so they
+  stay recognizable on color screens and in exports. Gray is the vocabulary color of
+  [`2-vocabulary-highlights.lua`](#2-vocabulary-highlightslua).
+- **White text on the dark colors** (Black, Maroon, Blue, Purple), on the picker buttons and,
+  with [`2-highlight-styles.lua`](#2-highlight-styleslua), on the page.
+- **Grid pickers:** colors 4 per row and styles 2 per row, so the whole list fits on the screen.
+- **Renamable on the device:** *Menu → tools tab → More tools → Highlight labels* renames any
+  color or style meaning, applied right away. An empty name goes back to the default.
+- **Filter shortcuts:** three gesture actions (*Settings → Taps and gestures → Gesture
+  manager*) filter the highlight list by style, by color, or by both.
 
-Names, symbols and tones live in the `CATEGORIES` table.
+![Highlights on a Kindle: styles and colors](docs/highlights-page.png)
+
+Colors, tones, default meanings and grid columns are in the `CONFIG` table. A default color
+for new highlights is set natively in *Menu → typeset tab → Highlights → Highlight color*
+(long-press to make it the default for every book).
+
+---
+
+### `2-highlight-styles.lua`
+
+Adds highlight styles next to KOReader's four (lighten, underline, strikethrough, invert):
+wavy, double, dashed and dotted underlines, a row of stars, a thick marker line, box and
+rounded box, brackets around the passage, large quotes around it, faux bold, faux italic and
+bold italic, and lighten combined with an underline or a rounded box.
+
+- The styles show up in every style picker, as if they were native.
+- *Invert* keeps a strip of the highlight color under the text, so the color isn't lost.
+- With a dark color, *Lighten* (and its combinations) draws white text on the color instead
+  of black text on a dark background.
 
 ---
 
@@ -186,8 +215,8 @@ the *Reading statistics* plugin enabled; the summary and the recap work without 
 
 ### `2-vocabulary-highlights.lua`
 
-Collects new words with a single highlight: give a highlight the gray color (the
-*✎ Vocabulary* category of `2-highlights.lua`) and the word goes to KOReader's
+Collects new words with a single highlight: give a highlight the gray color (reserved for
+vocabulary by `2-highlights.lua`) and the word goes to KOReader's
 *Vocabulary builder*, ready for flashcard review with spaced repetition.
 
 ![Words added from highlights in the Vocabulary builder](docs/vocabulary-highlights.png)
