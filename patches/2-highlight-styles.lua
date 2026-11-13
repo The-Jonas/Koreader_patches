@@ -16,7 +16,7 @@
       rounded_box       caixa com cantos arredondados (com folga nas laterais)
       dashed_box        caixa tracejada (com folga nas laterais)
       brackets          colchetes [ ] só no início e no fim do trecho
-      quotes            aspas “ ” cinza, grandes, afastadas do texto (não confunde com as do livro)
+      quotes            aspas “ ” grandes e encorpadas, na cor do destaque, afastadas do texto
       bold              negrito (falso, engrossa o texto já desenhado)
       italic            itálico (falso, inclina o texto já desenhado)
       bold_italic       negrito + itálico
@@ -57,9 +57,11 @@ local function pad()
     return sc(3)
 end
 
--- folga lateral só das aspas
+-- folga lateral só das aspas — bem pequena (quase colada), senão a aspa fica longe
+-- da marcação e passa a invadir a palavra vizinha (fora do destaque) em vez de
+-- ficar perto do trecho marcado
 local function quotePad()
-    return sc(1.5)
+    return 0
 end
 
 -- Rastreador de grupos: o destaque chega em retângulos (um por linha).
@@ -74,16 +76,27 @@ local function flushGroup()
 end
 
 -- retorna true se este retângulo inicia um novo grupo
-local function trackRect(bb, x, y, w, h, close, color)
+-- hl_index (quando disponível, vindo de ReaderView.highlight.visible_boxes) identifica
+-- a qual destaque o retângulo pertence: dois destaques adjacentes com o mesmo estilo,
+-- um logo abaixo do outro (sem nenhuma linha sem destaque entre eles), têm o mesmo
+-- espaçamento vertical de uma linha quebrada dentro de um único destaque longo — por
+-- geometria sozinha dá pra confundir os dois. Com o índice, comparamos identidade real
+-- em vez de só distância; sem ele (caminhos que não o fornecem), caímos na heurística
+-- antiga por posição.
+local function trackRect(bb, x, y, w, h, close, color, hl_index)
     local p = group.last
     local continues = false
     if p and p.bb == bb and p.close == close then
-        local same_line = math.abs(y - p.y) < p.h * 0.5 and x >= p.x
-        local next_line = y > p.y and (y - p.y) <= p.h * 2 and x < p.x + p.w
-        continues = same_line or next_line
+        if p.hl_index ~= nil and hl_index ~= nil then
+            continues = p.hl_index == hl_index
+        else
+            local same_line = math.abs(y - p.y) < p.h * 0.5 and x >= p.x
+            local next_line = y > p.y and (y - p.y) <= p.h * 2 and x < p.x + p.w
+            continues = same_line or next_line
+        end
     end
     if not continues then flushGroup() end
-    group.last = { bb = bb, x = x, y = y, w = w, h = h, close = close, color = color }
+    group.last = { bb = bb, x = x, y = y, w = w, h = h, close = close, color = color, hl_index = hl_index }
     return not continues
 end
 
@@ -199,13 +212,36 @@ add("dotted", "Dotted", function(bb, x, y, w, h, c)
     end
 end)
 
--- invertido, mas com uma faixa colorida embaixo: o nativo "invert" ignora a cor por completo
--- (só inverte os pixels), então a categoria some visualmente mesmo continuando salva. Registrar
--- a chave "invert" aqui assume o lugar do original e mantém a categoria visível.
-add("invert", "Invert", function(bb, x, y, w, h, c)
+-- invertido, com uma moldura tracejada ao redor: o nativo "invert" ignora a cor por
+-- completo (só inverte os pixels), então a categoria some visualmente mesmo
+-- continuando salva. Registrar a chave "invert" aqui assume o lugar do original e
+-- mantém a categoria visível.
+-- Nas cores escuras, invert e lighten dão o mesmo fundo (preto com texto branco), e
+-- lighten_rounded já usa uma moldura CONTÍNUA (sólida) na mesma situação — por isso
+-- aqui a moldura é TRACEJADA: visualmente clara mesmo em preto, e também combina com
+-- a ideia de "pista incompleta" do Foreshadowing (contra o "golpe" sólido do Plot Twist).
+add("invert", "Invert", function(bb, x, y, w, h, c, ctx)
     bb:invertRect(x, y, w, h)
-    local t = sc(3)
-    bb:paintRect(x, y + h - t, w, t, c)
+    local bandColor = isDark(ctx.color) and WHITE or c
+    local th, dash, gap = sc(1.5), sc(5), sc(3)
+    local function hline(yy)
+        local i = 0
+        while i < w do
+            bb:paintRect(x + i, yy, math.min(dash, w - i), th, bandColor)
+            i = i + dash + gap
+        end
+    end
+    local function vline(xx)
+        local i = 0
+        while i < h do
+            bb:paintRect(xx, y + i, th, math.min(dash, h - i), bandColor)
+            i = i + dash + gap
+        end
+    end
+    hline(y)
+    hline(y + h - th)
+    vline(x)
+    vline(x + w - th)
 end)
 
 -- marca-texto grosso embaixo
@@ -226,48 +262,72 @@ add("rounded_box", "Rounded box", function(bb, x, y, w, h, c)
     roundedBox(bb, x, y, w, h, c)
 end)
 
--- caixa tracejada
-add("dashed_box", "Dashed box", function(bb, x, y, w, h, c)
+-- caixa tracejada: num destaque de várias linhas, desenhar a caixa inteira em cada
+-- retângulo (uma por linha) deixa um emaranhado de caixas coladas. Em vez disso,
+-- seguimos o mesmo esquema de agrupamento de "brackets"/"quotes": abre (topo +
+-- lateral esquerda) só na primeira linha, fecha (base + lateral direita) só na
+-- última — o resultado é um contorno tracejado único em volta do trecho inteiro.
+local function dashedBoxHLine(bb, xx, yy, ww, c)
+    local th, dash, gap = sc(1), sc(6), sc(4)
+    local i = 0
+    while i < ww do
+        bb:paintRect(xx + i, yy, math.min(dash, ww - i), th, c)
+        i = i + dash + gap
+    end
+end
+
+local function dashedBoxVLine(bb, xx, yy, hh, c)
+    local th, dash, gap = sc(1), sc(6), sc(4)
+    local i = 0
+    while i < hh do
+        bb:paintRect(xx, yy + i, th, math.min(dash, hh - i), c)
+        i = i + dash + gap
+    end
+end
+
+local function dashedBoxClose(p)
+    local pd = pad()
+    local bx, bw = p.x - pd, p.w + 2 * pd
+    local th = sc(1)
+    dashedBoxHLine(p.bb, bx, p.y + p.h - th, bw, p.color)
+    dashedBoxVLine(p.bb, bx + bw - th, p.y, p.h, p.color)
+end
+
+add("dashed_box", "Dashed box", function(bb, x, y, w, h, c, ctx)
     local p = pad()
     local bx, bw = x - p, w + 2 * p
-    local th, dash, gap = sc(1), sc(6), sc(4)
-    local function hline(yy)
-        local i = 0
-        while i < bw do
-            bb:paintRect(bx + i, yy, math.min(dash, bw - i), th, c)
-            i = i + dash + gap
-        end
+    if trackRect(bb, x, y, w, h, dashedBoxClose, c, ctx and ctx.hl_index) then
+        dashedBoxHLine(bb, bx, y, bw, c)
+        dashedBoxVLine(bb, bx, y, h, c)
     end
-    local function vline(xx)
-        local i = 0
-        while i < h do
-            bb:paintRect(xx, y + i, th, math.min(dash, h - i), c)
-            i = i + dash + gap
-        end
-    end
-    hline(y)
-    hline(y + h - th)
-    vline(bx)
-    vline(bx + bw - th)
 end)
 
--- colchetes (só no início e no fim do trecho marcado)
+-- colchetes (só no início e no fim do trecho marcado): duplo traço + serifa longa,
+-- pra ficar mais "chamativo" e não se confundir com um sublinhado comum
 local function bracketClose(p)
-    local t, serif = sc(1), sc(4)
+    local t, serif = sc(2), sc(6)
     local edge = p.x + p.w + pad()
     p.bb:paintRect(edge - t, p.y, t, p.h, p.color)
     p.bb:paintRect(edge - serif, p.y, serif, t, p.color)
     p.bb:paintRect(edge - serif, p.y + p.h - t, serif, t, p.color)
 end
 
-add("brackets", "Brackets", function(bb, x, y, w, h, c)
-    if trackRect(bb, x, y, w, h, bracketClose, c) then
-        local t, serif = sc(1), sc(4)
+add("brackets", "Brackets", function(bb, x, y, w, h, c, ctx)
+    if trackRect(bb, x, y, w, h, bracketClose, c, ctx and ctx.hl_index) then
+        local t, serif = sc(2), sc(6)
         local lx = x - pad()
         bb:paintRect(lx, y, t, h, c)
         bb:paintRect(lx, y, serif, t, c)
         bb:paintRect(lx, y + h - t, serif, t, c)
     end
+end)
+
+-- traço fino e discreto no meio do texto: mais "incômodo baixo" do que um corte
+-- forte, combina com a ideia de algo perturbador mas sutil
+add("strikeout", "Strikethrough", function(bb, x, y, w, h)
+    local th = sc(1)
+    local midY = y + math.floor((h - th) / 2)
+    bb:paintRect(x, midY, w, th, GRAY)
 end)
 
 -- pontilhado de estrelinhas
@@ -354,17 +414,32 @@ local function fauxItalic(bb, x, y, w, h)
     copy:free()
 end
 
-add("bold", "Bold", function(bb, x, y, w, h)
+-- negrito + um traço grosso EM CIMA do texto — diferente do traço do itálico, que
+-- fica embaixo
+add("bold", "Bold", function(bb, x, y, w, h, c)
     fauxBold(bb, x, y, w, h)
+    local th = sc(2.5)
+    bb:paintRect(x, y, w, th, c)
 end)
 
-add("italic", "Italic", function(bb, x, y, w, h)
+-- itálico + sublinhado grosso embaixo, pra não ficar parecido com um itálico comum
+add("italic", "Italic", function(bb, x, y, w, h, c)
     fauxItalic(bb, x, y, w, h)
+    local th = sc(2.5)
+    bb:paintRect(x, y + h - th, w, th, c)
 end)
 
-add("bold_italic", "Bold + italic", function(bb, x, y, w, h)
+-- negrito + itálico com sublinhado pontilhado: diferente do sublinhado grosso
+-- (itálico puro) e da estrelinha (negrito puro)
+add("bold_italic", "Bold + italic", function(bb, x, y, w, h, c)
     fauxItalic(bb, x, y, w, h)
     fauxBold(bb, x, y, w, h)
+    local d, gap = sc(1.5), sc(2.5)
+    local i = 0
+    while i < w do
+        bb:paintRect(x + i, y + h - sc(2), math.min(d, w - i), d, c)
+        i = i + d + gap
+    end
 end)
 
 -- combinações com clareado: o traço precisa contrastar com o próprio fundo que o
@@ -395,7 +470,7 @@ local OPEN, CLOSE = "\u{201C}", "\u{201D}"
 local face_cache = {}
 
 local function quoteFace(h)
-    local dp = math.max(10, math.floor(h / math.max(1, Screen:scaleBySize(1)) * 1.2))
+    local dp = math.max(10, math.floor(h / math.max(1, Screen:scaleBySize(1)) * 1.6))
     if not face_cache[dp] then
         face_cache[dp] = Font:getFace("cfont", dp)
     end
@@ -408,22 +483,51 @@ local function glyphWidth(face, text)
     return face.size or 12
 end
 
-local function drawGlyph(bb, text, x, baseline, face)
-    pcall(RenderText.renderUtf8Text, RenderText, bb, math.max(0, x), baseline, face, text, true, true, GRAY)
+local function drawGlyph(bb, text, x, baseline, face, color)
+    -- negrito só da própria fonte (uma passada só) — grande já chama atenção sem
+    -- precisar do traço duplo, que deixava a aspa grossa demais e tomando espaço
+    -- de letras vizinhas
+    local ok_x = math.max(0, x)
+    pcall(RenderText.renderUtf8Text, RenderText, bb, ok_x, baseline, face, text, true, true, color or GRAY)
+end
+
+-- linha pontilhada embaixo do trecho inteiro (mesmo desenho do estilo "dotted"),
+-- do começo ao fim de onde fecham as aspas — em toda linha do destaque, não só
+-- perto da aspa — na cor do destaque, reforçando que a marca não é do livro
+local function quoteUnderline(bb, x, y, w, h, color)
+    local d, gap = sc(1.5), sc(2.5)
+    local i = 0
+    while i < w do
+        bb:paintRect(x + i, y + h - d, math.min(d, w - i), d, color or GRAY)
+        i = i + d + gap
+    end
 end
 
 local function quoteClose(p)
     local face = quoteFace(p.h)
-    drawGlyph(p.bb, CLOSE, p.x + p.w + quotePad(), p.y + math.floor(p.h * 0.75), face)
+    local cx = p.x + p.w + quotePad()
+    drawGlyph(p.bb, CLOSE, cx, p.y + math.floor(p.h * 0.85), face, p.color)
 end
 
-add("quotes", "Quotes", function(bb, x, y, w, h)
-    if trackRect(bb, x, y, w, h, quoteClose) then
+add("quotes", "Quotes", function(bb, x, y, w, h, c, ctx)
+    quoteUnderline(bb, x, y, w, h, c)
+    if trackRect(bb, x, y, w, h, quoteClose, c, ctx and ctx.hl_index) then
         local face = quoteFace(h)
         local qw = glyphWidth(face, OPEN)
-        drawGlyph(bb, OPEN, x - qw - quotePad(), y + math.floor(h * 0.75), face)
+        local cx = x - qw - quotePad()
+        drawGlyph(bb, OPEN, cx, y + math.floor(h * 0.85), face, c)
     end
 end)
+
+-- A cor "logo depois" do preto na lista de cores (2-highlights.lua), já resolvida
+-- pro valor de desenho — não fica guardada, calcula de novo a cada chamada porque a
+-- lista pode mudar (renomeação de cor não muda a ordem, mas por garantia)
+local function colorAfterBlack()
+    local list = ReaderHighlight.highlight_colors
+    local entry = list and list[2]
+    local key = entry and entry[2]
+    return key and Blitbuffer.colorFromName(key)
+end
 
 ------------------------------------------------------------------------
 -- Ganchos no ReaderView
@@ -431,6 +535,13 @@ end)
 local orig_drawHighlightRect = ReaderView.drawHighlightRect
 
 ReaderView.drawHighlightRect = function(self, bb, _x, _y, rect, drawer, color, draw_note_mark)
+    -- "lighten" e "lighten_rounded" preenchem o fundo todo e, na cor preta, ficam
+    -- parecidos entre si (e com outros estilos escuros). Em vez de só diferenciar
+    -- visualmente, esses dois nem chegam a desenhar de preto: cai pra próxima cor da
+    -- lista. Qualquer outra cor permanece exatamente a selecionada.
+    if (drawer == "lighten" or drawer == "lighten_rounded") and color == BLACK then
+        color = colorAfterBlack() or color
+    end
     if drawer == "lighten" and useDarkLighten(bb, color) then
         darkLighten(bb, rect, color)
         if draw_note_mark then
@@ -443,9 +554,18 @@ ReaderView.drawHighlightRect = function(self, bb, _x, _y, rect, drawer, color, d
         return orig_drawHighlightRect(self, bb, _x, _y, rect, drawer, color, draw_note_mark)
     end
     local x, y, w, h = (_x or 0) + rect.x, (_y or 0) + rect.y, rect.w, rect.h
+    -- Identifica a que destaque este retângulo pertence (quando disponível): o núcleo
+    -- preenche self.highlight.visible_boxes com um item por retângulo, na mesma ordem
+    -- em que desenha, então o último item inserido é o deste retângulo. Usado por
+    -- trackRect pra não juntar dois destaques adjacentes (brackets/quotes/dashed_box).
+    local hl_index
+    local vb = self.highlight and self.highlight.visible_boxes
+    if vb and vb[#vb] then
+        hl_index = vb[#vb].index
+    end
     local ctx = {
         view = self, bb = bb, _x = _x, _y = _y, rect = rect, color = color,
-        orig = orig_drawHighlightRect,
+        orig = orig_drawHighlightRect, hl_index = hl_index,
     }
     local ok, err = pcall(fn, bb, x, y, w, h, strokeColor(color), ctx)
     if not ok then
@@ -464,6 +584,17 @@ ReaderView.paintTo = function(self, bb, x, y)
     flushGroup()
     return ret
 end
+
+-- Expõe, pro 2-highlights.lua usar como prévia nos nomes dos estilos (função Preview
+-- style on names), só as funções que desenham sozinhas, sem depender de ctx nem do
+-- estado compartilhado entre retângulos (trackRect/group) — essas não têm esse risco,
+-- diferente de brackets/quotes/dashed_box, que ficam de fora daqui por esse motivo.
+ReaderHighlight._user_patch_style_paint = {
+    marker = styles.marker, double_underline = styles.double_underline, wavy = styles.wavy,
+    rounded_box = styles.rounded_box, strikeout = styles.strikeout, italic = styles.italic,
+    bold = styles.bold, bold_italic = styles.bold_italic, dotted = styles.dotted,
+    dashed = styles.dashed, box = styles.box, stars = styles.stars, invert = styles.invert,
+}
 
 ------------------------------------------------------------------------
 -- Registro dos estilos no menu do ReaderHighlight

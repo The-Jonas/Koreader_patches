@@ -22,8 +22,8 @@ Patches with options have a configuration table right below that block.
 |---|---|
 | [`2-cover-grid.lua`](#2-cover-gridlua) | Uniform covers and reading badges in the Project: Title grid |
 | [`2-physical-pages.lua`](#2-physical-pageslua) | Page numbers that match the printed edition |
-| [`2-highlights.lua`](#2-highlightslua) | Highlight meanings by style, colors on distinct grays, grid pickers and filter shortcuts |
-| [`2-highlight-styles.lua`](#2-highlight-styleslua) | Extra highlight styles: wavy, box, brackets, quotes, faux bold and italic and more |
+| [`2-highlights.lua`](#2-highlightslua) | Every style carries a meaning, colors on distinct grays, grid pickers, a marker guide and filter shortcuts |
+| [`2-highlight-styles.lua`](#2-highlight-styleslua) | Extra highlight styles: wavy, box, brackets, big colored quotes, faux bold and italic and more |
 | [`2-reading-dates.lua`](#2-reading-dateslua) | Start and finish date of every book |
 | [`2-progress-bar.lua`](#2-progress-barlua) | Progress bar styles for the status bar while reading |
 | [`2-reading-session.lua`](#2-reading-sessionlua) | Session summary, daily goal with streak, and a recap when coming back to a book |
@@ -107,9 +107,16 @@ that stay distinguishable on a grayscale e-ink screen.
 
 ![Color and style pickers](docs/highlights.png)
 
-- **Meaning by style:** Box means *Important*, Wavy *Confusing*, Quotes *Smart Quote*, Dashed
-  *Reference*, Dotted *WorldBuilding*, Brackets *Entities*, Italic *Emotional* and Bold
-  *Disturbing*. Style buttons read “Important · Box”, and the styles with a meaning come first.
+- **A meaning for every style:** all 20 styles carry a meaning, from ★ *Important* and
+  ◎ *World Building* to ✦ *Beautiful Writing* and ⚖ *Moral Dilemma*. Style buttons read
+  “★ Important · Lighten + underline”, icon and word each lined up in their own column across
+  the whole grid, and the styles with a meaning come first. Each name also shows a small preview
+  of the style itself (its underline, border, stars, brackets, and so on) next to the text.
+- **Marker guide:** the ℹ button at the bottom of the style picker opens a full-screen guide
+  listing every style with its icon, meaning, style name and a short explanation of what it's
+  for — a reminder of the whole system without leaving the book.
+- **Preview style on names:** a toggle in *Menu → tools tab → More tools → Highlight labels*
+  turns the preview decoration next to each style name on or off.
 - **Colors on distinct grays:** eleven colors, each tuned to land on its own gray level of a
   16-level e-ink screen, from Black (level 0) to Yellow (level 14). The hue is kept, so they
   stay recognizable on color screens and in exports. Gray is the vocabulary color of
@@ -124,20 +131,24 @@ that stay distinguishable on a grayscale e-ink screen.
 
 ![Highlights on a Kindle: styles and colors](docs/highlights-page.png)
 
-Colors, tones, default meanings and grid columns are in the `CONFIG` table. A default color
-for new highlights is set natively in *Menu → typeset tab → Highlights → Highlight color*
-(long-press to make it the default for every book).
+![Marker guide](docs/highlights-guide.png)
+
+Colors, tones, default meanings, guide text and grid columns are in the `CONFIG` table. A
+default color for new highlights is set natively in *Menu → typeset tab → Highlights →
+Highlight color* (long-press to make it the default for every book).
 
 ---
 
 ### `2-highlight-styles.lua`
 
 Adds highlight styles next to KOReader's four (lighten, underline, strikethrough, invert):
-wavy, double, dashed and dotted underlines, a row of stars, a thick marker line, box and
-rounded box, brackets around the passage, large quotes around it, faux bold, faux italic and
-bold italic, and lighten combined with an underline or a rounded box.
+wavy, double, dashed and dotted underlines, a row of stars, a thick marker line, box, dashed
+box and rounded box, brackets around the passage, large quotes around it, faux bold, faux
+italic and bold italic, and lighten combined with an underline or a rounded box.
 
 - The styles show up in every style picker, as if they were native.
+- *Quotes* draws bold “ ” marks well clear of the text, in the highlight's own color, so they
+  stand out on the page instead of blending into small gray marks.
 - *Invert* keeps a strip of the highlight color under the text, so the color isn't lost.
 - With a dark color, *Lighten* (and its combinations) draws white text on the color instead
   of black text on a dark background.
